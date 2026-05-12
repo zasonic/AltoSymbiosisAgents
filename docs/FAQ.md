@@ -42,11 +42,6 @@ cost crosses the limit. Set to 0 for no limit.
 You crossed the warning threshold (default 80%). Adjust the threshold
 or the budget in Settings.
 
-## Can I use a model other than Claude through the API?
-
-Not in chat. Power Mode supports OpenAI and LiteLLM as the execution
-model provider.
-
 ## Where do I report a bug?
 
 [GitHub Issues](https://github.com/zasonic/iMakeAiTeams/issues).
