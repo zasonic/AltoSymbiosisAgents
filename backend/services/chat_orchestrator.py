@@ -1480,7 +1480,7 @@ class ChatOrchestrator:
                     agent_id=agent_id or "",
                     conversation_id=conversation_id,
                     governance=self._governance,
-                    execution_bridge=getattr(self, "_execution_bridge", None),
+                    execution_bridge=None,
                 )
                 _emit_event("camel_started", {
                     "rag_chunks": len(mem.rag_chunks),
