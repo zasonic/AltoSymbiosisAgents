@@ -1,9 +1,4 @@
 // desktop-ui/components/ChatView.tsx — chat panel with conversation list + streaming.
-//
-// v3 adds Power Mode: when `power_mode_enabled`, the renderer asks the
-// backend to classify each message; "execution"-class messages go to
-// /api/docker/execute and stream OpenClaw step events via SSE. "Chat"-class
-// messages keep the v2 path intact.
 
 import {
   useCallback,
@@ -22,7 +17,6 @@ import {
 import {
   Attachments,
   Chat,
-  Docker,
   PromptTemplates,
   Settings,
   Voice,
@@ -32,10 +26,9 @@ import {
   type SearchResult,
 } from "@/api/client";
 import { t } from "@/i18n";
-import { ExecutionCard } from "@/components/ExecutionCard";
 import { MessageBubble, type MessageRow } from "@/components/chat/MessageBubble";
 import { MessageRenderer } from "@/components/MessageRenderer";
-import { useAppStore, type PowerModeRun } from "@/stores/appStore";
+import { useAppStore } from "@/stores/appStore";
 
 interface ConversationRow {
   id: string;
@@ -45,14 +38,11 @@ interface ConversationRow {
 
 type ChatItem =
   | { kind: "message"; key: string; msg: MessageRow }
-  | { kind: "run"; key: string; run: PowerModeRun }
   | { kind: "stream"; key: "stream"; buffer: string };
 
 interface ChatRowData {
   items: ChatItem[];
   setRowHeight: (index: number, height: number) => void;
-  approve: (taskId: string, approvalId: string, allow: boolean) => void;
-  cancelRun: (taskId: string) => void;
   voiceOutputEnabled: boolean;
 }
 
@@ -83,10 +73,6 @@ export function ChatView() {
   const startChatStream = useAppStore((s) => s.startChatStream);
   const endChatStream = useAppStore((s) => s.endChatStream);
   const pushToast = useAppStore((s) => s.pushToast);
-  const powerModeRuns = useAppStore((s) => s.powerModeRuns);
-  const resolvePowerModeApproval = useAppStore((s) => s.resolvePowerModeApproval);
-  const powerModeEnabled = useAppStore((s) => s.powerModeEnabled);
-  const setPowerModeEnabled = useAppStore((s) => s.setPowerModeEnabled);
   const pendingAttachments = useAppStore((s) => s.pendingAttachments);
   const setPendingAttachments = useAppStore((s) => s.setPendingAttachments);
   const addPendingAttachment = useAppStore((s) => s.addPendingAttachment);
@@ -130,13 +116,8 @@ export function ChatView() {
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Send phase explicitly drives the Send button's disabled state and the
-  // cleanup effects below. "classifying" covers the (potentially LLM-backed)
-  // classify round-trip; while in that state, neither the chat-stream nor
-  // Power Mode cleanup effects should fire.
-  const [sendPhase, setSendPhase] = useState<
-    "idle" | "classifying" | "chat" | "execution"
-  >("idle");
-  const [activeTaskId, setActiveTaskId] = useState<string>("");
+  // cleanup effects below.
+  const [sendPhase, setSendPhase] = useState<"idle" | "chat">("idle");
   const [loadError, setLoadError] = useState<string>("");
 
   // PR 13: cross-conversation FTS5 search. ``searchQuery`` is the raw
@@ -152,7 +133,7 @@ export function ChatView() {
 
   const responseRef = useRef<HTMLDivElement | null>(null);
   // Synchronous lock so two near-simultaneous Enter presses can't both pass
-  // the `busy` guard before React re-renders with sendPhase="classifying".
+  // the `busy` guard before React re-renders with sendPhase="chat".
   const sendLockRef = useRef(false);
   // Tracks whether the user is mid-IME composition. CJK input methods fire
   // Enter to commit a composition, which would otherwise submit the form
@@ -160,16 +141,13 @@ export function ChatView() {
   const composingRef = useRef(false);
   const ready = status?.status === "ready";
 
-  // Sync the Power Mode flag from the sidecar on first ready. After that the
-  // appStore owns the value — SettingsPanel updates it whenever the toggle
-  // changes, so a refetch here would race with that.
+  // Seed the voice toggles from the sidecar on first ready.
   useEffect(() => {
     if (!ready) return;
     let alive = true;
     Settings.get()
       .then((s) => {
         if (!alive) return;
-        setPowerModeEnabled(!!s.power_mode_enabled);
         setVoiceInputEnabled(!!s.voice_input_enabled);
         setVoiceOutputEnabled(!!s.voice_output_enabled);
       })
@@ -177,7 +155,7 @@ export function ChatView() {
     return () => {
       alive = false;
     };
-  }, [ready, setPowerModeEnabled]);
+  }, [ready]);
 
   // PR 17: re-sync the voice toggle whenever the user flips it elsewhere.
   // SettingsPanel writes the same setting; we listen for the focus event
@@ -753,59 +731,10 @@ export function ChatView() {
     sendLockRef.current = true;
     const text = input;
     setInput("");
-    setSendPhase("classifying");
     setMessages((prev) => [
       ...prev,
       { id: `local-${Date.now()}`, role: "user", content: text },
     ]);
-
-    let routedToExecution = false;
-    if (powerModeEnabled) {
-      try {
-        const verdict = await Docker.classify(text, activeId);
-        if (verdict.route === "execution") {
-          const health = await Docker.health().catch(() => ({ ok: false } as { ok: boolean }));
-          if (!health.ok) {
-            // OpenClaw isn't healthy — fall back to chat with a hint.
-            pushToast({
-              kind: "warn",
-              text: "Power Mode is enabled but OpenClaw isn't running. Falling back to chat.",
-            });
-          } else {
-            const r = await Docker.execute(activeId, text);
-            if (r.ok && r.task_id) {
-              setActiveTaskId(r.task_id);
-              setSendPhase("execution");
-              routedToExecution = true;
-            } else if (r.error) {
-              pushToast({ kind: "error", text: r.error });
-            }
-          }
-        }
-      } catch (err) {
-        // Classifier failure shouldn't block the user — fall back to chat.
-        console.warn("classify failed:", err);
-      }
-    } else {
-      // Power Mode off — but if the message *looks* execution-class, hint at it.
-      try {
-        const verdict = await Docker.classify(text, activeId);
-        if (verdict.route === "execution") {
-          pushToast({
-            kind: "info",
-            text:
-              "I can do this for you if you enable Power Mode in Settings.",
-          });
-        }
-      } catch {
-        /* classifier is optional in this path */
-      }
-    }
-
-    if (routedToExecution) {
-      sendLockRef.current = false;
-      return;
-    }
 
     setSendPhase("chat");
     startChatStream(activeId);
@@ -824,8 +753,6 @@ export function ChatView() {
   };
 
   // When a chat stream ends, drop busy and reload persisted messages.
-  // Only fires for the chat path; Power Mode and classifying phases use their
-  // own cleanup so this effect can't clear busy mid-flight.
   useEffect(() => {
     if (sendPhase !== "chat") return;
     if (activeChat) return; // chat still streaming
@@ -848,48 +775,11 @@ export function ChatView() {
     endChatStream();
   }, [ready, sendPhase, endChatStream]);
 
-  // When the active Power Mode run finishes, drop busy and clear the task id
-  // so a new send doesn't think the old (already-done) task is still active.
-  const activeRun = activeTaskId ? powerModeRuns[activeTaskId] : null;
-  useEffect(() => {
-    if (sendPhase !== "execution") return;
-    if (!activeTaskId) return;
-    if (!activeRun) return;
-    if (activeRun.done) {
-      setSendPhase("idle");
-      setActiveTaskId("");
-    }
-  }, [activeRun, activeTaskId, sendPhase]);
-
   const cancelActive = async () => {
-    if (sendPhase === "execution" && activeTaskId) {
-      try {
-        await Docker.cancel(activeTaskId);
-      } catch {
-        /* ignore */
-      }
-      setActiveTaskId("");
-      setSendPhase("idle");
-      return;
-    }
     if (sendPhase === "chat") {
       Chat.stop().catch(() => {});
       // The chat stream end effect will flip back to "idle".
       return;
-    }
-    // Classifying — abandon the in-flight request and reset.
-    setSendPhase("idle");
-  };
-
-  const approve = async (taskId: string, approvalId: string, allow: boolean) => {
-    try {
-      await Docker.approve(taskId, approvalId, allow);
-      resolvePowerModeApproval(taskId, approvalId);
-    } catch (err) {
-      pushToast({
-        kind: "error",
-        text: err instanceof Error ? err.message : "Approval failed",
-      });
     }
   };
 
@@ -899,29 +789,19 @@ export function ChatView() {
     [conversations, activeId],
   );
 
-  // Power Mode runs scoped to the active conversation, in order.
-  const conversationRuns = useMemo(() => {
-    return Object.values(powerModeRuns)
-      .filter((r) => r.conversationId === activeId)
-      .sort((a, b) => a.startedAt - b.startedAt);
-  }, [powerModeRuns, activeId]);
-
-  // Unified item stream so the virtualized list can render messages, Power
-  // Mode runs, and the streaming preview as a single scrollable surface.
+  // Unified item stream so the virtualized list can render messages and the
+  // streaming preview as a single scrollable surface.
   const items = useMemo<ChatItem[]>(() => {
     const xs: ChatItem[] = messages.map((m) => ({
       kind: "message",
       key: m.id,
       msg: m,
     }));
-    for (const run of conversationRuns) {
-      xs.push({ kind: "run", key: `run-${run.taskId}`, run });
-    }
     if (streamingBuffer) {
       xs.push({ kind: "stream", key: "stream", buffer: streamingBuffer });
     }
     return xs;
-  }, [messages, conversationRuns, streamingBuffer]);
+  }, [messages, streamingBuffer]);
 
   // Per-row measured heights so VariableSizeList can render only the rows
   // that fit the viewport. Heights start as estimates and snap to the real
@@ -954,13 +834,9 @@ export function ChatView() {
     listRef.current?.scrollToItem(items.length - 1, "end");
   }, [items.length, streamingBuffer]);
 
-  const cancelRun = useCallback((taskId: string) => {
-    Docker.cancel(taskId).catch(() => {});
-  }, []);
-
   const rowData = useMemo<ChatRowData>(
-    () => ({ items, setRowHeight, approve, cancelRun, voiceOutputEnabled }),
-    [items, setRowHeight, approve, cancelRun, voiceOutputEnabled],
+    () => ({ items, setRowHeight, voiceOutputEnabled }),
+    [items, setRowHeight, voiceOutputEnabled],
   );
 
   // Track the message-list area's pixel size so VariableSizeList can size
@@ -1180,11 +1056,7 @@ export function ChatView() {
                 data-testid="chat-input"
                 className="input w-full min-h-[44px] max-h-40 resize-none"
                 placeholder={
-                  ready
-                    ? powerModeEnabled
-                      ? "Type a message… (Power Mode is on)"
-                      : "Type a message…"
-                    : "Waiting for backend…"
+                  ready ? "Type a message…" : "Waiting for backend…"
                 }
                 value={input}
                 onChange={(e) => onInputChange(e.target.value)}
@@ -1688,15 +1560,6 @@ function ChatListRow({ index, style, data }: ListChildComponentProps<ChatRowData
             voiceOutputEnabled={data.voiceOutputEnabled}
           />
         )}
-        {item.kind === "run" && (
-          <PowerModeMessage
-            run={item.run}
-            onApprove={(approvalId, allow) =>
-              data.approve(item.run.taskId, approvalId, allow)
-            }
-            onCancel={() => data.cancelRun(item.run.taskId)}
-          />
-        )}
         {item.kind === "stream" && (
           <div
             aria-live="polite"
@@ -1720,134 +1583,6 @@ function ChatListRow({ index, style, data }: ListChildComponentProps<ChatRowData
 }
 
 // MessageBubble extracted to components/chat/MessageBubble.tsx (Layer C2).
-
-// ── Power Mode message bubble ───────────────────────────────────────────────
-
-interface PowerModeMessageProps {
-  run: PowerModeRun;
-  onApprove: (approvalId: string, allow: boolean) => void;
-  onCancel: () => void;
-}
-
-function PowerModeMessage({ run, onApprove, onCancel }: PowerModeMessageProps) {
-  const elapsed = Math.max(0, Math.floor((Date.now() - run.startedAt) / 1000));
-  const showProgress = !run.done;
-
-  return (
-    <div className="max-w-[85%] rounded-xl px-4 py-3 text-sm bg-bg-2 text-ink border border-line space-y-2">
-      <div className="flex items-center gap-2 text-[11px] text-ink-faint">
-        <span className="px-1.5 py-0.5 rounded bg-accent/15 text-accent border border-accent/30 font-semibold">
-          ⚡ Power Mode
-        </span>
-        <span className="font-mono">{run.taskId}</span>
-        {showProgress && (
-          <span className="text-warn">working… {elapsed}s</span>
-        )}
-        {showProgress && (
-          <button type="button" className="ml-auto text-ink-dim hover:text-ink" onClick={onCancel}>
-            Cancel
-          </button>
-        )}
-      </div>
-
-      {run.steps.length > 0 && (
-        <div className="space-y-1.5">
-          {run.steps.map((step) => (
-            <ExecutionCard key={step.step_id} step={step} />
-          ))}
-        </div>
-      )}
-
-      {run.approvals.map((appr) => (
-        <ApprovalCard
-          key={appr.approval_id}
-          summary={appr.summary}
-          details={appr.details}
-          danger={appr.danger}
-          expiresAt={appr.expires_at}
-          onAllow={() => onApprove(appr.approval_id, true)}
-          onDeny={() => onApprove(appr.approval_id, false)}
-        />
-      ))}
-
-      {run.resultText && (
-        <div className="whitespace-pre-wrap text-sm">{run.resultText}</div>
-      )}
-
-      {run.error && (
-        <div className="rounded-md border border-err/40 bg-err/5 px-3 py-2 text-err text-xs">
-          {run.error}
-        </div>
-      )}
-
-      {run.done && !run.error && !run.resultText && (
-        <div className="text-[11px] text-ink-faint">Cancelled by user</div>
-      )}
-    </div>
-  );
-}
-
-interface ApprovalCardProps {
-  summary: string;
-  details: Record<string, unknown>;
-  danger: "low" | "medium" | "high";
-  expiresAt: number;
-  onAllow: () => void;
-  onDeny: () => void;
-}
-
-function ApprovalCard({
-  summary,
-  details,
-  danger,
-  expiresAt,
-  onAllow,
-  onDeny,
-}: ApprovalCardProps) {
-  const [, force] = useState(0);
-  const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
-  useEffect(() => {
-    // Run a single 1s timer per approval and stop ticking once the deadline
-    // has passed. The effect re-runs only when expiresAt changes, so we
-    // don't accumulate timers across re-renders.
-    if (Date.now() >= expiresAt) return;
-    const id = window.setInterval(() => {
-      force((n) => n + 1);
-      if (Date.now() >= expiresAt) window.clearInterval(id);
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [expiresAt]);
-  const tone = danger === "high"
-    ? "border-err/50 bg-err/5"
-    : danger === "low"
-      ? "border-line bg-bg-1"
-      : "border-warn/40 bg-warn/5";
-
-  return (
-    <div className={`rounded-md border ${tone} px-3 py-2 text-sm space-y-2`}>
-      <div className="flex items-center justify-between">
-        <span className="font-semibold">Approval needed</span>
-        <span className="text-[11px] text-ink-faint">
-          auto-deny in {remaining}s
-        </span>
-      </div>
-      <p className="text-ink">{summary || "OpenClaw wants to perform an action."}</p>
-      {Object.keys(details).length > 0 && (
-        <pre className="text-[11px] font-mono whitespace-pre-wrap text-ink-dim border-t border-line/60 pt-2">
-          {JSON.stringify(details, null, 2)}
-        </pre>
-      )}
-      <div className="flex gap-2 pt-1">
-        <button type="button" className="btn-primary text-xs" onClick={onAllow}>
-          Allow
-        </button>
-        <button type="button" className="btn-ghost text-xs" onClick={onDeny}>
-          Deny
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // ── Export menu (PR 7) ──────────────────────────────────────────────────────
 //
