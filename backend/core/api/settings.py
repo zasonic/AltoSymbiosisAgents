@@ -37,10 +37,6 @@ class SettingsAPI(BaseAPI):
         raw_key = self._settings.get("claude_api_key", "")
         masked_key = _mask_secret(raw_key)
 
-        # Power Mode (v3) — secret value is masked, never returned in cleartext.
-        raw_pm_key = self._settings.get("power_mode_api_key", "")
-        masked_pm_key = _mask_secret(raw_pm_key)
-
         return {
             "lm_studio_url":         self._settings.get("lm_studio_url"),
             "ollama_url":            self._settings.get("ollama_url"),
@@ -60,15 +56,6 @@ class SettingsAPI(BaseAPI):
             "first_run_complete":            self._settings.get("first_run_complete"),
             "max_conversation_budget_usd":   self._settings.get("max_conversation_budget_usd"),
             "budget_warning_threshold_pct":  self._settings.get("budget_warning_threshold_pct"),
-            # Power Mode
-            "power_mode_enabled":         bool(self._settings.get("power_mode_enabled")),
-            "power_mode_workspace":       self._settings.get("power_mode_workspace") or "",
-            "power_mode_model_provider":  self._settings.get("power_mode_model_provider") or "anthropic",
-            "power_mode_model_name":      self._settings.get("power_mode_model_name") or "",
-            "power_mode_api_key":         masked_pm_key,
-            "power_mode_api_key_set":     bool(raw_pm_key),
-            "power_mode_autostart":       bool(self._settings.get("power_mode_autostart")),
-            "power_mode_gateway_port":    int(self._settings.get("power_mode_gateway_port") or 18789),
             # Phase 10: silent auto-update toggle.
             "auto_update_enabled":        bool(self._settings.get("auto_update_enabled")),
             # PR 17: voice input/output toggles + selected models.
