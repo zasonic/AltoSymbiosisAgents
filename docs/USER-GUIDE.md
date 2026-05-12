@@ -40,14 +40,6 @@ Three layers, all on disk:
 
 Search across saved facts and documents from the Memory panel.
 
-## Power Mode (opt-in)
-
-Delegate execution-style messages (write code, run shell, edit files,
-browse the web) to OpenClaw running in Docker. Chat keeps working as
-before; Power Mode only triggers for messages classified as execution.
-Workspace folder, model provider, API key, and gateway port are
-configured in Settings → Power Mode.
-
 ## Studio Mode
 
 Toggle at the bottom of the sidebar for advanced panels: prompt
