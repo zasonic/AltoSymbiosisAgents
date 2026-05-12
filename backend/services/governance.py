@@ -41,7 +41,7 @@ try:
 except ImportError:
     _sse_events = None
 
-log = logging.getLogger("iMakeAiTeams.governance")
+log = logging.getLogger("altosybioagents.governance")
 
 
 @dataclass

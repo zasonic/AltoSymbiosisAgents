@@ -44,11 +44,11 @@ paths:
 
 - Settings JSON: `user_dir() / "settings.json"`
 - SQLite DB: `user_dir() / "myai.db"`
-- API key: OS keyring under service name `iMakeAiTeams`
+- API key: OS keyring under service name `altosybioagents`
 
-`user_dir()` resolves to `%APPDATA%/iMakeAiTeams` on Windows,
-`~/Library/Application Support/iMakeAiTeams` on macOS, and
-`~/.local/share/iMakeAiTeams` on Linux.
+`user_dir()` resolves to `%APPDATA%/altosybioagents` on Windows,
+`~/Library/Application Support/altosybioagents` on macOS, and
+`~/.local/share/altosybioagents` on Linux.
 
 ## Schema
 

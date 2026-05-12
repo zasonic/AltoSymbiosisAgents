@@ -127,7 +127,7 @@ def _render(rows: list[dict[str, Any]], methodology: dict[str, Any]) -> str:
     """
     header = (
         "# Security Benchmarks — AgentDojo\n\n"
-        "Continuous evaluation of the iMakeAiTeams security stack against "
+        "Continuous evaluation of the altosybioagents security stack against "
         "the four [AgentDojo](https://github.com/ethz-spylab/agentdojo) "
         "published suites. The numbers below are produced by\n"
         "`.github/workflows/security-bench.yml` (weekly on Mondays at 06:00 "

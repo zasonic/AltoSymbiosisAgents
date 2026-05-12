@@ -1,5 +1,5 @@
 """
-tests/conftest.py — Shared fixtures for the iMakeAiTeams backend tests.
+tests/conftest.py — Shared fixtures for the altosybioagents backend tests.
 
 Sets up an in-memory SQLite database and path hacks so that test files
 can import backend modules without installing the package.
@@ -41,7 +41,7 @@ def in_memory_db(tmp_path):
     Tears down by resetting the module-level state.
     """
     import db
-    db.init_db(tmp_path / "imakeaiteams.db")
+    db.init_db(tmp_path / "altosybioagents.db")
     yield db
     # Teardown: close connection and reset globals
     if db._conn is not None:

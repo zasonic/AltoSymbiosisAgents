@@ -24,7 +24,7 @@ from typing import Any, Optional
 
 from services.memory import MemoryContext
 
-log = logging.getLogger("iMakeAiTeams.memory_recall")
+log = logging.getLogger("altosybioagents.memory_recall")
 
 # Engram U-shaped finding: ~25% memory, ~75% reasoning is optimal. For
 # simple queries we trim aggressively to avoid RAG noise overwhelming the

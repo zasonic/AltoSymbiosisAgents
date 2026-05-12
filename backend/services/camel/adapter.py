@@ -26,7 +26,7 @@ from typing import Any, Callable
 from .capabilities import CapabilityTaggedResult, capabilities_for_tool
 from .exceptions import CamelToolDenied
 
-log = logging.getLogger("iMakeAiTeams.camel.adapter")
+log = logging.getLogger("altosybioagents.camel.adapter")
 
 
 def make_tool_executor_for_turn(

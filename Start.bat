@@ -1,5 +1,5 @@
 @echo off
-REM Start.bat — single user-facing entry point for iMakeAiTeams dev.
+REM Start.bat — single user-facing entry point for altosybioagents dev.
 REM
 REM First run (no node_modules) installs prerequisites via dev\install.ps1
 REM and then launches the app. Subsequent runs go straight to npm run dev.

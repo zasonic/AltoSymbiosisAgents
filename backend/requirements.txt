@@ -1,4 +1,4 @@
-# ── iMakeAiTeams sidecar — lite bundle (~80 MB installed) ─────────────────────
+# ── altosybioagents sidecar — lite bundle (~80 MB installed) ─────────────────────
 #
 # This is the only requirements file shipped with the Electron installer.
 # RAG / semantic memory uses fastembed (ONNX) + sqlite-vec instead of

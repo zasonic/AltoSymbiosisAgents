@@ -427,7 +427,7 @@ export const useAppStore = create<AppState>()(
         })),
     }),
     {
-      name: "imakeaiteams-prefs",
+      name: "altosybioagents-prefs",
       storage: createJSONStorage(() => localStorage),
       // Only persist user preferences, never runtime state.
       partialize: (state) => ({

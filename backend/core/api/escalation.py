@@ -17,7 +17,7 @@ import db as _db
 
 from ._base import BaseAPI
 
-log = logging.getLogger("iMakeAiTeams.api.escalation")
+log = logging.getLogger("altosybioagents.api.escalation")
 
 
 class EscalationAPI(BaseAPI):

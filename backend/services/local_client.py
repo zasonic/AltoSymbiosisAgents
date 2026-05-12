@@ -21,7 +21,7 @@ from services.llm_interface import LLMClient
 # such as "qwen3-30b-a3b", "Qwen/Qwen3-30B-A3B-Instruct", "qwen3-30b-a3b-q4_k_m".
 _QWEN3_30B_A3B_ID = re.compile(r"qwen3.*30b.*a3b", re.IGNORECASE)
 
-log = logging.getLogger("iMakeAiTeams.local")
+log = logging.getLogger("altosybioagents.local")
 
 _FALLBACK = "[Local model unavailable — no response]"
 

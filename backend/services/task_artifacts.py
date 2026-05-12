@@ -15,7 +15,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 
-log = logging.getLogger("iMakeAiTeams.task_artifacts")
+log = logging.getLogger("altosybioagents.task_artifacts")
 
 # ── Artifact directory ───────────────────────────────────────────────────────
 

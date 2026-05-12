@@ -26,7 +26,7 @@ import re
 
 from models import RouteDecision
 
-log = logging.getLogger("iMakeAiTeams.router")
+log = logging.getLogger("altosybioagents.router")
 
 # ── Deterministic keyword fallback ────────────────────────────────────────
 # Used when no local model is available for routing classification.

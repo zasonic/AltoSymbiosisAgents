@@ -21,7 +21,7 @@ from models import SessionHistory
 
 from ._context import MemoryContext
 
-log = logging.getLogger("iMakeAiTeams.memory.rag")
+log = logging.getLogger("altosybioagents.memory.rag")
 
 SIMILARITY_THRESHOLD = 0.5
 

@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-log = logging.getLogger("iMakeAiTeams.model_catalog")
+log = logging.getLogger("altosybioagents.model_catalog")
 
 # Path resolution: ``backend/config/models.json`` relative to this file,
 # regardless of where the sidecar was launched from. Tests can override the

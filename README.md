@@ -1,4 +1,4 @@
-# iMakeAiTeams
+# altosybioagents
 
 Build AI teams that work together on your desktop. Chat with Claude and
 local models, create specialist agents, index your files, and keep
@@ -7,7 +7,7 @@ everything on your machine.
 ## Install
 
 Download the latest installer from
-[Releases](https://github.com/zasonic/iMakeAiTeams/releases) and double-click.
+[Releases](https://github.com/zasonic/altosybioagents/releases) and double-click.
 No setup required.
 
 You will need:
@@ -32,9 +32,9 @@ dev\build-installer.bat      # produce NSIS installer (Windows)
 
 ## Where things live
 
-- App data: `%APPDATA%/iMakeAiTeams/` on Windows,
-  `~/Library/Application Support/iMakeAiTeams/` on macOS,
-  `~/.config/iMakeAiTeams/` on Linux. Settings, SQLite database, and logs
+- App data: `%APPDATA%/altosybioagents/` on Windows,
+  `~/Library/Application Support/altosybioagents/` on macOS,
+  `~/.config/altosybioagents/` on Linux. Settings, SQLite database, and logs
   all live there. The API key is in the OS keyring, not on disk.
 - Source layout: `desktop-ui/` (React renderer), `desktop-shell/` (Electron
   main + preload), `backend/` (Python FastAPI sidecar), `branding/` (icon +

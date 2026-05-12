@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from services.turn_context import TurnContext
 
-log = logging.getLogger("iMakeAiTeams.turn_router")
+log = logging.getLogger("altosybioagents.turn_router")
 
 
 @dataclass(frozen=True)

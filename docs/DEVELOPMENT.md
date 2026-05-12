@@ -58,7 +58,7 @@ npm run dist             # build:sidecar + build + electron-builder NSIS
 ```
 
 On Windows, `dev\build-installer.bat` chains all three and produces
-`dist/iMakeAiTeams-Setup-<version>.exe`. Test the installer on a clean
+`dist/altosybioagents-Setup-<version>.exe`. Test the installer on a clean
 VM (no Python, no Node).
 
 ## Code style

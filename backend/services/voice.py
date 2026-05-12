@@ -55,7 +55,7 @@ import requests
 from core import paths
 from core.settings import Settings
 
-log = logging.getLogger("iMakeAiTeams.voice")
+log = logging.getLogger("altosybioagents.voice")
 
 
 # ── Catalog of bundled-binary-companion voice assets ─────────────────────────

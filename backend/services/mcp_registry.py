@@ -28,7 +28,7 @@ from typing import Iterable, Optional
 
 from services.mcp_loader import MCPServer, ToolSchema, scan_servers
 
-log = logging.getLogger("iMakeAiTeams.mcp_registry")
+log = logging.getLogger("altosybioagents.mcp_registry")
 
 PROMPT_HEADING = "## Available tools (MCP)"
 SETTING_DISABLED_KEY = "mcp_servers_disabled"

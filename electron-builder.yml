@@ -1,6 +1,6 @@
-appId: com.imakeaiteams.app
-productName: iMakeAiTeams
-copyright: Copyright © 2026 iMakeAiTeams
+appId: com.altosybioagents.app
+productName: altosybioagents
+copyright: Copyright © 2026 altosybioagents
 asar: true
 
 directories:
@@ -43,7 +43,7 @@ win:
   # Otherwise auto-update will reject every release as publisher-mismatched.
   # Re-add once a cert is in place.
   # publisherName:
-  #   - iMakeAiTeams
+  #   - altosybioagents
 
 nsis:
   oneClick: false
@@ -52,14 +52,14 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: iMakeAiTeams
-  uninstallDisplayName: iMakeAiTeams
+  shortcutName: altosybioagents
+  uninstallDisplayName: altosybioagents
   deleteAppDataOnUninstall: false
 
 publish:
   provider: github
   owner: zasonic
-  repo: iMakeAiTeams
+  repo: altosybioagents
   # Emit latest.yml alongside the NSIS installer so electron-updater can
   # discover the new version. Defaults to true for the github provider, but
   # making it explicit guards against a future electron-builder release

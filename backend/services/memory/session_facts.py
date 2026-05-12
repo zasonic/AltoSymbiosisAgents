@@ -41,7 +41,7 @@ from .write_gate import (
     MemoryWriteGate, _trust_scan, _write_to_pending_review,
 )
 
-log = logging.getLogger("iMakeAiTeams.memory.session_facts")
+log = logging.getLogger("altosybioagents.memory.session_facts")
 
 # ── Module-level counters (read via __getattr__ from services.memory) ────────
 # health_monitor.py reaches in for these via ``from services.memory import

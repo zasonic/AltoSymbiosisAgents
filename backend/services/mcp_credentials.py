@@ -7,7 +7,7 @@ this is enforced by an AST guard test in tests/test_mcp_credentials.py.
 
 Secrets are stored in the OS keyring (DPAPI on Windows, Keychain on macOS,
 SecretService on Linux) under the service name
-``iMakeAiTeams.mcp.<server_id>``. The set of declared environment-variable
+``altosybioagents.mcp.<server_id>``. The set of declared environment-variable
 keys lives in each server's mcp.json manifest under ``env_keys``; this module
 only persists/retrieves values, it does not declare schemas.
 
@@ -24,9 +24,9 @@ from typing import Iterator
 
 from .mcp_loader import validate_server_id
 
-log = logging.getLogger("iMakeAiTeams.mcp_credentials")
+log = logging.getLogger("altosybioagents.mcp_credentials")
 
-KEYRING_SERVICE_PREFIX = "iMakeAiTeams.mcp."
+KEYRING_SERVICE_PREFIX = "altosybioagents.mcp."
 
 
 def _service_name(server_id: str) -> str:

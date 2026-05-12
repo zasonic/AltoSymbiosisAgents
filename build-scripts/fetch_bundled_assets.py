@@ -90,7 +90,7 @@ PIPER_VOICES = [
 
 def _http_get(url: str, *, accept: str = "application/json") -> bytes:
     req = urllib.request.Request(url, headers={"Accept": accept,
-                                                "User-Agent": "iMakeAiTeams-build"})
+                                                "User-Agent": "altosybioagents-build"})
     with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
         return resp.read()
 

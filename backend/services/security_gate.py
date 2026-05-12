@@ -40,7 +40,7 @@ from services.security_engine import (
 )
 from services.turn_context import TurnContext
 
-log = logging.getLogger("iMakeAiTeams.security_gate")
+log = logging.getLogger("altosybioagents.security_gate")
 
 # Sliding window: how many turn-level cumulative scores we keep per conv.
 RISK_WINDOW_SIZE = 5

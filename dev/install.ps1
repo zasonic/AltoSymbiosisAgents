@@ -1,4 +1,4 @@
-# dev/install.ps1 — first-run bootstrap for iMakeAiTeams.
+# dev/install.ps1 — first-run bootstrap for altosybioagents.
 #
 # Runs on a clean Windows machine with nothing but PowerShell preinstalled.
 # Installs Node.js LTS, Python 3.12, all npm + pip dependencies, and the
@@ -77,7 +77,7 @@ function Download-File($Url, $Out) {
     # 2) System.Net.WebClient
     try {
         $wc = New-Object System.Net.WebClient
-        $wc.Headers.Add("User-Agent", "iMakeAiTeams-setup")
+        $wc.Headers.Add("User-Agent", "altosybioagents-setup")
         $wc.DownloadFile($Url, $Out)
         if ((Test-Path $Out) -and ((Get-Item $Out).Length -gt 0)) { return $true }
     } catch {
@@ -127,7 +127,7 @@ function Install-Node {
         Write-Warn2 "winget not available; falling back to MSI"
     }
 
-    $msi = Join-Path $env:TEMP "imakeaiteams-node.msi"
+    $msi = Join-Path $env:TEMP "altosybioagents-node.msi"
     if (-not (Download-File $NODE_MSI_FALLBACK $msi)) {
         throw "Could not download Node.js installer. Check your internet connection or install Node 20 LTS manually from https://nodejs.org and rerun Start.bat."
     }
@@ -178,7 +178,7 @@ function Install-Python {
         }
     }
 
-    $exe = Join-Path $env:TEMP "imakeaiteams-python.exe"
+    $exe = Join-Path $env:TEMP "altosybioagents-python.exe"
     if (-not (Download-File $PYTHON_EXE_FALLBACK $exe)) {
         throw "Could not download Python installer. Install Python 3.12+ manually from https://www.python.org/downloads/ (check 'Add Python to PATH') and rerun Start.bat."
     }
@@ -203,7 +203,7 @@ function Assert-Tool($name, $hint) {
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 try {
-    Write-Step "iMakeAiTeams setup — verifying prerequisites"
+    Write-Step "altosybioagents setup — verifying prerequisites"
     Refresh-Path
 
     # Node

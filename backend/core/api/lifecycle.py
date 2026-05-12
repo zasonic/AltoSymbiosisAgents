@@ -18,7 +18,7 @@ import threading
 
 from ._base import BaseAPI
 
-log = logging.getLogger("iMakeAiTeams.api.lifecycle")
+log = logging.getLogger("altosybioagents.api.lifecycle")
 
 
 class LifecycleAPI(BaseAPI):

@@ -377,7 +377,7 @@ async function fetchAutoUpdateEnabled(info: SidecarHttpInfo): Promise<boolean> {
 // Constructed once and reused for every "update-available" payload. The
 // publish target in electron-builder.yml is the source of truth; this
 // constant must mirror it. Keep in sync if the publish section ever moves.
-const RELEASE_NOTES_BASE = "https://github.com/zasonic/iMakeAiTeams/releases/tag";
+const RELEASE_NOTES_BASE = "https://github.com/zasonic/altosybioagents/releases/tag";
 
 async function wireAutoUpdater(): Promise<void> {
   if (!app.isPackaged) return;

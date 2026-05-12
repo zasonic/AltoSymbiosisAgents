@@ -1,5 +1,5 @@
 """
-db.py — SQLite database manager for iMakeAiTeams.
+db.py — SQLite database manager for altosybioagents.
 
 Single source of truth for the persistent database. All modules import
 from here and never touch sqlite3 directly.
@@ -112,7 +112,7 @@ def _get_conn() -> sqlite3.Connection:
         _conn.enable_load_extension(False)
     except Exception as _vec_err:
         import logging as _log_mod
-        _log_mod.getLogger("iMakeAiTeams.db").warning(
+        _log_mod.getLogger("altosybioagents.db").warning(
             "sqlite-vec extension failed to load: %s — vector search disabled", _vec_err
         )
     return _conn

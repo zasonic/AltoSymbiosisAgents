@@ -34,7 +34,7 @@ from models import RoutingDecision, TaskDescriptor, WorkerResult
 from services.hub_router import HubRouter
 from services.turn_router import RouteOutcome
 
-log = logging.getLogger("iMakeAiTeams.worker_dispatch")
+log = logging.getLogger("altosybioagents.worker_dispatch")
 
 
 class WorkerDispatch:

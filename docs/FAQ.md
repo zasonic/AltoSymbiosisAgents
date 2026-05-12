@@ -44,10 +44,10 @@ or the budget in Settings.
 
 ## Where do I report a bug?
 
-[GitHub Issues](https://github.com/zasonic/iMakeAiTeams/issues).
+[GitHub Issues](https://github.com/zasonic/altosybioagents/issues).
 Attach the diagnostics export from Settings → Troubleshooting.
 
 ## Where's the v5 code?
 
 The pre-v6 codebase lives on the
-[legacy/v5 branch](https://github.com/zasonic/iMakeAiTeams/tree/legacy/v5).
+[legacy/v5 branch](https://github.com/zasonic/altosybioagents/tree/legacy/v5).

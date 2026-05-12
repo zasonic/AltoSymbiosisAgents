@@ -42,7 +42,7 @@ from .capabilities import (
 )
 from .exceptions import CamelToolDenied, CapabilityViolation, PlanParseError
 
-log = logging.getLogger("iMakeAiTeams.camel.interpreter")
+log = logging.getLogger("altosybioagents.camel.interpreter")
 
 
 # ── AST allow / deny lists ───────────────────────────────────────────────────

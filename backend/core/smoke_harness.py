@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 
 
-_log = logging.getLogger("iMakeAiTeams.smoke")
+_log = logging.getLogger("altosybioagents.smoke")
 
 SMOKE_ENV = "MYAI_SMOKE_TEST"
 SMOKE_DIR_ENV = "MYAI_SMOKE_DIR"

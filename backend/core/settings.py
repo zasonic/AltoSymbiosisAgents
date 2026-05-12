@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-log = logging.getLogger("iMakeAiTeams.settings")
+log = logging.getLogger("altosybioagents.settings")
 
 # ── Secret routing via OS keyring ────────────────────────────────────────────
 # Keys in this set are stored in the platform keyring (DPAPI on Windows,
@@ -23,7 +23,7 @@ log = logging.getLogger("iMakeAiTeams.settings")
 # keyring and cleared from the JSON file so the secret only lives on-disk in
 # the OS-native store.
 SECRET_KEYS: set[str] = {"claude_api_key"}
-KEYRING_SERVICE = "iMakeAiTeams"
+KEYRING_SERVICE = "altosybioagents"
 
 
 def _keyring_get(key: str) -> str | None:

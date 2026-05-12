@@ -1,4 +1,4 @@
-# pyinstaller.spec — onedir bundle for the iMakeAiTeams Python sidecar.
+# pyinstaller.spec — onedir bundle for the altosybioagents Python sidecar.
 #
 # Produces backend/dist/server/server.exe + a sibling _internal/ tree.
 # 3-build-installer.bat copies the whole dist/server directory into

@@ -181,7 +181,7 @@ export function FirstRunWizard({ onComplete }: Props) {
             Setup · step {stepNum} of {totalSteps}
           </div>
           <h1 className="text-xl font-semibold">
-            {step === "welcome" && "Welcome to iMakeAiTeams"}
+            {step === "welcome" && "Welcome to altosybioagents"}
             {step === "claude" && "Connect to Claude"}
             {step === "local_choice" && "How do you want to run local models?"}
             {step === "quick_start" && "Downloading the recommended model"}

@@ -1,5 +1,5 @@
 """
-backend/tests/agentdojo/ — AgentDojo benchmark harness for the iMakeAiTeams stack.
+backend/tests/agentdojo/ — AgentDojo benchmark harness for the altosybioagents stack.
 
 This package is intentionally separate from the runtime test suite. Importing
 ``agentdojo`` is gated on the package being installed; if it is not, this
