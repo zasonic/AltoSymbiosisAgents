@@ -35,7 +35,7 @@ from fastapi.responses import FileResponse
 
 from ._helpers import get_api
 
-log = logging.getLogger("iMakeAiTeams.attachments")
+log = logging.getLogger("altosybioagents.attachments")
 
 router = APIRouter()
 

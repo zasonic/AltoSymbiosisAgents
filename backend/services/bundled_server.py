@@ -50,7 +50,7 @@ import requests
 from core import paths
 from core.settings import Settings
 
-log = logging.getLogger("iMakeAiTeams.bundled")
+log = logging.getLogger("altosybioagents.bundled")
 
 # ── Catalog of known-good models ─────────────────────────────────────────────
 #

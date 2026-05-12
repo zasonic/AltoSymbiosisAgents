@@ -40,7 +40,7 @@ try:
 except ImportError:
     _sse_events = None
 
-log = logging.getLogger("iMakeAiTeams.memory.write_gate")
+log = logging.getLogger("altosybioagents.memory.write_gate")
 
 
 # ── Priority 7: Trust scanning ────────────────────────────────────────────────

@@ -19,7 +19,7 @@ from collections import deque
 
 from models import SessionHistory
 
-log = logging.getLogger("iMakeAiTeams.memory.buffer")
+log = logging.getLogger("altosybioagents.memory.buffer")
 
 # ── Public constants (re-exported via services/memory/__init__.py) ───────────
 # The orchestrator's monolithic-vs-split decisions and a few tests

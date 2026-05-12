@@ -36,7 +36,7 @@ from services.voice import (
 
 from ._helpers import get_api
 
-log = logging.getLogger("iMakeAiTeams.voice.routes")
+log = logging.getLogger("altosybioagents.voice.routes")
 
 router = APIRouter()
 

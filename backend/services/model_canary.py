@@ -43,7 +43,7 @@ try:
 except ImportError:  # pragma: no cover — only when sse_events is unavailable
     _sse_events = None
 
-log = logging.getLogger("iMakeAiTeams.canary")
+log = logging.getLogger("altosybioagents.canary")
 
 # Per the paper: trip the alert when the mean cosine drift exceeds this.
 DRIFT_ALERT_THRESHOLD = 0.40

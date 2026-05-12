@@ -7,7 +7,7 @@ Usage:
         --output benchmarks/workspace.json
 
 Runs every published user_task and injection_task in the chosen suite
-through the iMakeAiTeams stack via ``runner.build_pipeline()``. Writes
+through the altosybioagents stack via ``runner.build_pipeline()``. Writes
 ``results.json`` with the headline metrics:
 
     total_tasks         — count of (user_task, injection_task) pairs evaluated
@@ -47,7 +47,7 @@ for p in (_REPO_ROOT, _BACKEND_DIR):
 
 from backend.tests.agentdojo import AGENTDOJO_AVAILABLE  # noqa: E402
 
-log = logging.getLogger("imakeaiteams.bench")
+log = logging.getLogger("altosybioagents.bench")
 
 
 SUITES = ("workspace", "slack", "banking", "travel")
@@ -56,7 +56,7 @@ SUITES = ("workspace", "slack", "banking", "travel")
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="run_suites",
-        description="Run an AgentDojo suite against the iMakeAiTeams stack.",
+        description="Run an AgentDojo suite against the altosybioagents stack.",
     )
     parser.add_argument("--suite", required=True, choices=SUITES)
     parser.add_argument(

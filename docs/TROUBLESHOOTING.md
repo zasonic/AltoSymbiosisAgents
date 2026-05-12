@@ -48,7 +48,7 @@ script is safe to run multiple times.
 
 ## Sidecar fails to start
 
-Open `%APPDATA%\iMakeAiTeams\sidecar.log` and read the last 50 lines.
+Open `%APPDATA%\altosybioagents\sidecar.log` and read the last 50 lines.
 Common causes:
 - Port in use by another process.
 - Antivirus blocking the PyInstaller-bundled `server.exe`.

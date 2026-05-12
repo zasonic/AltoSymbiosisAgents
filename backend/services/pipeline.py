@@ -46,7 +46,7 @@ from models import (
 from services.hub_router import HubRouter
 from services.redact import redact
 
-log = logging.getLogger("iMakeAiTeams.pipeline")
+log = logging.getLogger("altosybioagents.pipeline")
 
 # Maximum sub-tasks the coordinator can decompose into. Prevents runaway
 # decomposition on adversarial or ambiguous inputs.

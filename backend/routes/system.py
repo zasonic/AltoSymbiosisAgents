@@ -18,7 +18,7 @@ from services.bundled_server import BundledServerError, DEFAULT_MODEL_ID
 
 from ._helpers import get_api
 
-log = logging.getLogger("iMakeAiTeams.routes.system")
+log = logging.getLogger("altosybioagents.routes.system")
 
 router = APIRouter()
 

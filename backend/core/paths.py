@@ -26,11 +26,11 @@ from pathlib import Path
 
 from platformdirs import user_data_dir
 
-APP_NAME = "iMakeAiTeams"
-APP_AUTHOR = "iMakeAiTeams"
+APP_NAME = "altosybioagents"
+APP_AUTHOR = "altosybioagents"
 MIGRATION_SENTINEL = ".migrated_v5"
 V5_RENAME_SENTINEL = ".migrated_v6_rename"
-LEGACY_APP_NAME = "iMakeAiTeams"
+LEGACY_APP_NAME = "altosybioagents"
 
 # Legacy artifacts that lived next to the executable in v5.0.x.
 # Order matters: SQLite WAL/SHM must move with the main DB file.
@@ -59,7 +59,7 @@ def legacy_user_dir() -> Path:
 
 def migrate_v5_user_dir() -> None:
     """
-    One-shot move of v5 user data from the legacy 'iMakeAiTeams' dir to the
+    One-shot move of v5 user data from the legacy 'altosybioagents' dir to the
     new 'MyAIAgentHub' dir after the APP_NAME rename. Called once at startup
     from app/main.py, before logging is configured.
 

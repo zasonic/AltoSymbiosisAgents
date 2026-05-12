@@ -30,7 +30,7 @@ import db as _db
 from services.redact import redact
 from services.turn_context import TurnContext
 
-log = logging.getLogger("iMakeAiTeams.turn_lifecycle")
+log = logging.getLogger("altosybioagents.turn_lifecycle")
 
 
 @dataclass(frozen=True)

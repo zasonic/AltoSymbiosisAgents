@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from models import RoutingDecision
 from services.turn_context import TurnContext
 
-log = logging.getLogger("iMakeAiTeams.escalation_ladder")
+log = logging.getLogger("altosybioagents.escalation_ladder")
 
 # Threshold below which a local response is considered "empty enough" to
 # bypass the quality scorer and escalate directly. Pre-Layer-3 was inlined

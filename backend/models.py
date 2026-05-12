@@ -1,5 +1,5 @@
 """
-models.py — Typed data contracts for iMakeAiTeams.
+models.py — Typed data contracts for altosybioagents.
 
 All core data structures are frozen dataclasses. Internal code passes these
 typed objects. Only api.py converts to dicts at the JS boundary.
@@ -339,7 +339,7 @@ def semantic_validate_handoff(
     response can't be parsed — never blocks the handoff.
     """
     import logging as _logging
-    _log = _logging.getLogger("iMakeAiTeams.models")
+    _log = _logging.getLogger("altosybioagents.models")
 
     validate_handoff_packet(packet)
     if not packet.validation_passed:

@@ -31,7 +31,7 @@ from .interpreter import CamelInterpreter, InterpreterResult
 from .exceptions import CapabilityViolation, PlanParseError
 from .prompts import P_LLM_SYSTEM_PROMPT, Q_LLM_SYSTEM_PROMPT
 
-log = logging.getLogger("iMakeAiTeams.camel.pipeline")
+log = logging.getLogger("altosybioagents.camel.pipeline")
 
 
 _FENCE_RE = re.compile(

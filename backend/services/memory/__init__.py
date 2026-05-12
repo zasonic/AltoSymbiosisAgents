@@ -52,7 +52,7 @@ from .write_gate import (
     save_explicit_memory as _save_explicit_memory,
 )
 
-log = logging.getLogger("iMakeAiTeams.memory")
+log = logging.getLogger("altosybioagents.memory")
 
 # Re-exported names: keep the public symbol list explicit so a future
 # refactor can see what the façade is committing to.

@@ -49,7 +49,7 @@ export function Sidebar() {
             ai
           </div>
           <div className="leading-tight">
-            <div className="text-sm font-semibold">iMakeAiTeams</div>
+            <div className="text-sm font-semibold">altosybioagents</div>
             <div className="text-[10px] uppercase tracking-wide text-ink-faint">
               Local-first
             </div>

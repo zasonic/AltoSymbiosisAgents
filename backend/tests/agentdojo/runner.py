@@ -1,6 +1,6 @@
 """
 backend/tests/agentdojo/runner.py — AgentDojo-compatible adapter around the
-iMakeAiTeams security stack.
+altosybioagents security stack.
 
 This module exposes ``build_pipeline()``, which returns an
 ``agentdojo.agent_pipeline.AgentPipeline`` whose tool-execution loop is
@@ -60,7 +60,7 @@ from services.security_engine import (  # noqa: E402
 )
 from services.governance import GovernanceEngine  # noqa: E402
 
-log = logging.getLogger("imakeaiteams.bench.agentdojo")
+log = logging.getLogger("altosybioagents.bench.agentdojo")
 
 
 # ── Reader prompt (mirrors chat_orchestrator's _read_phase contract) ─────────

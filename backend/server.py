@@ -176,7 +176,7 @@ def build_app(token: str, user_data: Path | None) -> tuple[FastAPI, _AppContaine
         yield
 
     app = FastAPI(
-        title="iMakeAiTeams Sidecar", version="1.0.0", lifespan=_lifespan,
+        title="altosybioagents Sidecar", version="1.0.0", lifespan=_lifespan,
     )
 
     # CORS: Electron's renderer runs on file:// or http://localhost in dev.

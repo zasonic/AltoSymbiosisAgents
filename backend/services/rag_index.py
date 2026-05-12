@@ -26,7 +26,7 @@ from pathlib import Path
 
 from services.redact import redact
 
-log = logging.getLogger("iMakeAiTeams.rag_index")
+log = logging.getLogger("altosybioagents.rag_index")
 
 # Similarity threshold below which chunks are still returned but scored
 # (the MemoryManager decides whether to include them).

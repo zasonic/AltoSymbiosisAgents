@@ -1,6 +1,6 @@
 # Codebase Review Report
 
-Findings from a full read of the iMakeAiTeams codebase, organized by severity (most likely to cause real user-facing problems first). Each finding has been verified against the source at the cited file:line locations.
+Findings from a full read of the altosybioagents codebase, organized by severity (most likely to cause real user-facing problems first). Each finding has been verified against the source at the cited file:line locations.
 
 ---
 

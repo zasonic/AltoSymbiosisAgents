@@ -53,7 +53,7 @@ from services.security_engine import (
     RISK_ABORT_THRESHOLD,
 )
 
-log = logging.getLogger("iMakeAiTeams.chat")
+log = logging.getLogger("altosybioagents.chat")
 
 
 def _list_routable_agents() -> list[dict]:
