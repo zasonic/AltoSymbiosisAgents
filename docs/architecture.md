@@ -11,8 +11,7 @@ Three processes, one user-facing app.
   sidecar over REST and Server-Sent Events.
 - **Python sidecar** (`backend/server.py`) — FastAPI, picks a random
   free port at startup and writes `PORT=<n>` to stdout. The brain of
-  the app: chat orchestration, routing, memory, agents, MCP, Power
-  Mode bridge.
+  the app: chat orchestration, routing, memory, agents, MCP.
 
 ## Process boundaries
 
@@ -37,7 +36,6 @@ Three processes, one user-facing app.
 - `services/memory.py` — buffer, fact store, RAG retrieval.
 - `services/governance.py` — per-agent tool/budget policy.
 - `services/qwen_thinking.py` — Qwen3 hybrid /think + /no_think paths.
-- `services/execution_bridge.py` — Power Mode dispatch to OpenClaw.
 
 ## Data layout
 
