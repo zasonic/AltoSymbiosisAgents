@@ -132,56 +132,6 @@ class _AppContainer:
         self.bus = EventBus()
         self.api = API(self.settings, self.bus, _HERE, log)
 
-        # ── Power Mode (v3) — additive OpenClaw delegation ────────────────
-        # All three handles are constructed unconditionally; their lifecycle
-        # work is gated by the user's `power_mode_enabled` setting so v2 users
-        # never touch Docker. Failure to construct is non-fatal: routes/docker
-        # surfaces a 503 with a plain-English message.
-        self.docker = None
-        self.execution_bridge = None
-        self.execution_classifier = None
-        self._docker_watch_stop = threading.Event()
-        try:
-            from services.docker_manager import DockerManager
-            from services.execution_bridge import ExecutionBridge
-            from services.hub_router import ExecutionClassifier
-
-            templates_dir = _HERE / "templates"
-            self.docker = DockerManager(
-                settings=self.settings,
-                user_data_dir=paths.user_dir(),
-                templates_dir=templates_dir,
-                emit=sse_events.publish,
-            )
-            self.execution_bridge = ExecutionBridge(
-                docker_manager=self.docker,
-                settings=self.settings,
-                emit=sse_events.publish,
-            )
-            self.execution_classifier = ExecutionClassifier(
-                claude_client=self.api.claude_client,
-            )
-
-            # Auto-start OpenClaw if the user opted in. Always run on a
-            # daemon thread so a missing Docker install can't block sidecar
-            # boot.
-            if self.settings.get("power_mode_enabled") and self.settings.get("power_mode_autostart"):
-                threading.Thread(
-                    target=self.docker.start_openclaw,
-                    daemon=True,
-                    name="power-mode-autostart",
-                ).start()
-
-            # Background health watcher — only acts when Power Mode is on.
-            threading.Thread(
-                target=self.docker.watch_and_restart,
-                args=(self._docker_watch_stop,),
-                daemon=True,
-                name="power-mode-watch",
-            ).start()
-        except Exception as exc:
-            log.warning("Power Mode services failed to initialise: %s", exc, exc_info=True)
-
         # Match the legacy main.py post-load behavior: kick off heavy services
         # in a background thread so /health responds quickly.
         self.api.start_deferred_init()
@@ -199,20 +149,6 @@ class _AppContainer:
             log.warning("bundled-autostart spawn failed: %s", exc, exc_info=True)
 
     def shutdown(self) -> None:
-        try:
-            self._docker_watch_stop.set()
-        except Exception:
-            pass
-        if self.execution_bridge is not None:
-            try:
-                self.execution_bridge.shutdown()
-            except Exception as exc:
-                log.warning("execution_bridge.shutdown raised: %s", exc, exc_info=True)
-        if self.docker is not None:
-            try:
-                self.docker.shutdown()
-            except Exception as exc:
-                log.warning("docker.shutdown raised: %s", exc, exc_info=True)
         try:
             self.api.shutdown()
         except Exception as exc:
@@ -275,7 +211,6 @@ def build_app(token: str, user_data: Path | None) -> tuple[FastAPI, _AppContaine
         attachments as attachments_routes,
         chat as chat_routes,
         conversations as conversations_routes,
-        docker as docker_routes,
         echo as echo_routes,
         escalation as escalation_routes,
         events as events_routes,
@@ -313,7 +248,6 @@ def build_app(token: str, user_data: Path | None) -> tuple[FastAPI, _AppContaine
     app.include_router(safety_routes.router, prefix="/api/safety")
     app.include_router(system_routes.router, prefix="/api/system")
     app.include_router(usage_routes.router, prefix="/api/usage")
-    app.include_router(docker_routes.router, prefix="/api/docker")
     app.include_router(voice_routes.router, prefix="/api/voice")
 
     @app.post("/shutdown")
