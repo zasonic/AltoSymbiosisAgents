@@ -1,15 +1,52 @@
-AltoSymbiosisAgents
-A local-first desktop app for working with AI on your own computer. Chat with Claude and your local models side by side — they share routing, memory, and your indexed files. Simple turns stay local; complex turns reach Claude. The symbiosis is in the loop, not the marketing.
-What it does
+# iMakeAiTeams
 
-Two model families, one chat. Routes each turn between your local model (Ollama or LM Studio) and Claude. The status bar shows which answered and what it cost.
-Agent teams. Create specialists with system prompts and skills. Group them; the coordinator decomposes turns, dispatches sub-tasks, chains structured handoffs between agents, and synthesizes the final answer.
-RAG over your files. Index documents with fastembed (ONNX, no network, no PyTorch). Hybrid retrieval over vectors and keywords via sqlite-vec + BM25.
-Three-layer memory. Recent turns, promoted facts, document RAG — all on disk, all yours.
-MCP support. Standard Model Context Protocol — connect your existing tools to your agents.
-Sandboxed tool dispatch. A CaMeL-style restricted-Python interpreter refuses to let untrusted data drive control flow. Built from the DeepMind CaMeL paper, not invented.
+Build AI teams that work together on your desktop. Chat with Claude and
+local models, create specialist agents, index your files, and keep
+everything on your machine.
 
-What it does not do
-No code execution. No shell access. No browser automation. No filesystem writes outside its own database. No cloud sync. No telemetry. Your Anthropic API key lives in the OS keyring; your messages, files, and conversation history live in your user-data folder. Uninstall and that folder takes everything with it.
-Built for
-People who want capable AI tools that stay on the machine they're sitting at — researchers, writers, analysts, hobbyists. Anyone who reads agent-security press in 2026 and prefers the version of AI tooling that doesn't ask for shell access.
+## Install
+
+Download the latest installer from
+[Releases](https://github.com/zasonic/iMakeAiTeams/releases) and double-click.
+No setup required.
+
+You will need:
+- An [Anthropic API key](https://console.anthropic.com/settings/keys).
+- [Ollama](https://ollama.com/download) or [LM Studio](https://lmstudio.ai/)
+  for local models (optional but recommended — keeps simple messages free).
+
+## Run
+
+Open the app, paste your API key in Settings, and start chatting. Messages
+route automatically: simple turns go to a local model when one is available,
+complex turns go to Claude.
+
+For developers (Windows): double-click `Start.bat`. First run installs
+Node, Python, and dependencies; subsequent runs go straight to dev mode.
+
+```
+Start.bat                    # install + dev (Windows)
+npm run dev                  # cross-platform dev (after manual setup)
+dev\build-installer.bat      # produce NSIS installer (Windows)
+```
+
+## Where things live
+
+- App data: `%APPDATA%/iMakeAiTeams/` on Windows,
+  `~/Library/Application Support/iMakeAiTeams/` on macOS,
+  `~/.config/iMakeAiTeams/` on Linux. Settings, SQLite database, and logs
+  all live there. The API key is in the OS keyring, not on disk.
+- Source layout: `desktop-ui/` (React renderer), `desktop-shell/` (Electron
+  main + preload), `backend/` (Python FastAPI sidecar), `branding/` (icon +
+  staged sidecar bundle), `dev/` (developer scripts).
+
+Deeper docs:
+- [docs/USER-GUIDE.md](docs/USER-GUIDE.md) — features and how to use them.
+- [docs/architecture.md](docs/architecture.md) — services, schemas, IPC.
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — dev setup and build flow.
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common errors.
+- [docs/FAQ.md](docs/FAQ.md) — common questions.
+- [docs/legacy.md](docs/legacy.md) — pre-v6 code lives on the legacy/v5 branch.
+- [BENCHMARKS.md](BENCHMARKS.md) — AgentDojo ASR vs the published baseline, refreshed every push to `main`.
+
+MIT — see [LICENSE](LICENSE).

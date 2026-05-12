@@ -1,0 +1,67 @@
+appId: com.imakeaiteams.app
+productName: iMakeAiTeams
+copyright: Copyright © 2026 iMakeAiTeams
+asar: true
+
+directories:
+  output: dist
+  buildResources: branding
+
+files:
+  - out/**/*
+  - package.json
+  - "!**/*.{md,map,ts,tsx}"
+  - "!**/{tsconfig*,*.config.*,.eslintrc*}"
+
+extraResources:
+  # Mirrors branding/sidecar-bundle/** into resources/backend/. As of PR 17
+  # this tree contains:
+  #   server.exe + onedir layout — the FastAPI sidecar
+  #   llama-server/              — the bundled llama.cpp server (Phase 9)
+  #   bundled_models.json        — HF catalog with pinned sha256 (Phase 9)
+  #   whisper/                   — bundled Whisper.cpp CLI + DLLs (PR 17)
+  #   piper/                     — bundled Piper TTS + DLLs (PR 17)
+  #   voice_assets.json          — voice model catalog with pinned sha256 (PR 17)
+  # build-installer.bat regenerates the directory on every run, so
+  # electron-builder always picks up the latest contents.
+  - from: branding/sidecar-bundle
+    to: backend
+    filter: ["**/*"]
+  - from: branding/icon.png
+    to: icon.png
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: branding/icon.png
+  artifactName: "${productName}-Setup-${version}.${ext}"
+  # publisherName must match the CN of the signing certificate exactly.
+  # electron-updater verifies the downloaded installer's publisher against
+  # this value, so it MUST be set only when a real code-signing certificate
+  # is wired in (win.certificateFile / certificateSubjectName / CSC_LINK).
+  # Otherwise auto-update will reject every release as publisher-mismatched.
+  # Re-add once a cert is in place.
+  # publisherName:
+  #   - iMakeAiTeams
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: iMakeAiTeams
+  uninstallDisplayName: iMakeAiTeams
+  deleteAppDataOnUninstall: false
+
+publish:
+  provider: github
+  owner: zasonic
+  repo: iMakeAiTeams
+  # Emit latest.yml alongside the NSIS installer so electron-updater can
+  # discover the new version. Defaults to true for the github provider, but
+  # making it explicit guards against a future electron-builder release
+  # silently flipping the default.
+  publishAutoUpdate: true
