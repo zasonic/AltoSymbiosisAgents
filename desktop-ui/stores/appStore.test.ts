@@ -10,7 +10,6 @@ beforeEach(() => {
   useAppStore.setState({
     toasts: [],
     activeChat: null,
-    powerModeRuns: {},
   }, false);
 });
 
@@ -59,64 +58,3 @@ describe("appendChatToken", () => {
   });
 });
 
-describe("upsertPowerModeStep", () => {
-  it("updates an existing step in place without duplicating it", () => {
-    useAppStore.getState().startPowerModeRun("task-1", "conv-1");
-    useAppStore.getState().upsertPowerModeStep("task-1", {
-      step_id: "s1",
-      kind: "shell",
-      status: "running",
-      command: "echo hi",
-    });
-    let run = useAppStore.getState().powerModeRuns["task-1"];
-    expect(run.steps).toHaveLength(1);
-    expect(run.steps[0].status).toBe("running");
-
-    useAppStore.getState().upsertPowerModeStep("task-1", {
-      step_id: "s1",
-      kind: "shell",
-      status: "done",
-      stdout: "hi",
-    });
-    run = useAppStore.getState().powerModeRuns["task-1"];
-    expect(run.steps).toHaveLength(1);
-    expect(run.steps[0].status).toBe("done");
-    expect(run.steps[0].stdout).toBe("hi");
-    // Earlier fields from the running step are preserved through the merge.
-    expect(run.steps[0].command).toBe("echo hi");
-  });
-});
-
-describe("endPowerModeRun cleanup", () => {
-  it("filters expired approvals and removes the run after 2 hours", () => {
-    const now = 1_700_000_000_000;
-    vi.setSystemTime(now);
-    useAppStore.getState().startPowerModeRun("task-2", "conv-1");
-    useAppStore.getState().addPowerModeApproval("task-2", {
-      approval_id: "a-fresh",
-      summary: "fresh",
-      details: {},
-      danger: "low",
-      expires_at: now + 60_000,
-    });
-    useAppStore.getState().addPowerModeApproval("task-2", {
-      approval_id: "a-expired",
-      summary: "expired",
-      details: {},
-      danger: "low",
-      expires_at: now - 1,
-    });
-
-    useAppStore.getState().endPowerModeRun("task-2");
-    const ended = useAppStore.getState().powerModeRuns["task-2"];
-    expect(ended.done).toBe(true);
-    expect(ended.approvals.map((a) => a.approval_id)).toEqual(["a-fresh"]);
-
-    // Just past the 2-hour TTL the completed run is swept out of state.
-    // vi's fake timer queue advances independently of the mocked Date, so
-    // bump the system clock forward and then drain the timer queue.
-    vi.setSystemTime(now + 7_200_001);
-    vi.advanceTimersByTime(7_200_001);
-    expect(useAppStore.getState().powerModeRuns["task-2"]).toBeUndefined();
-  });
-});

@@ -20,13 +20,6 @@ vi.mock("@/api/client", () => ({
     stop: vi.fn(),
     newConversation: vi.fn(),
   },
-  Docker: {
-    classify: vi.fn(),
-    health: vi.fn(),
-    execute: vi.fn(),
-    cancel: vi.fn(),
-    approve: vi.fn(),
-  },
   Settings: {
     get: vi.fn(),
   },
@@ -82,7 +75,6 @@ beforeEach(() => {
     {
       sidecarStatus: READY_STATUS,
       toasts: [],
-      powerModeRuns: {},
       pendingAttachments: {},
     },
     false,
@@ -103,7 +95,6 @@ beforeEach(() => {
   vi.mocked(Chat.searchConversations).mockReset();
   vi.mocked(Chat.searchConversations).mockResolvedValue([]);
   vi.mocked(Settings.get).mockResolvedValue({
-    power_mode_enabled: false,
     voice_input_enabled: false,
     voice_output_enabled: false,
   } as never);
@@ -705,7 +696,6 @@ describe("ChatView voice input (PR 17)", () => {
 
   it("does not render the mic button when voice_input_enabled is false", async () => {
     vi.mocked(Settings.get).mockResolvedValue({
-      power_mode_enabled: false,
       voice_input_enabled: false,
       voice_output_enabled: false,
     } as never);
@@ -715,7 +705,6 @@ describe("ChatView voice input (PR 17)", () => {
 
   it("renders the mic button when voice_input_enabled is true", async () => {
     vi.mocked(Settings.get).mockResolvedValue({
-      power_mode_enabled: false,
       voice_input_enabled: true,
       voice_output_enabled: false,
     } as never);
@@ -727,7 +716,6 @@ describe("ChatView voice input (PR 17)", () => {
 
   it("clicking mic toggles isRecording and starts MediaRecorder", async () => {
     vi.mocked(Settings.get).mockResolvedValue({
-      power_mode_enabled: false,
       voice_input_enabled: true,
       voice_output_enabled: false,
     } as never);
@@ -749,7 +737,6 @@ describe("ChatView voice input (PR 17)", () => {
 
   it("stopping the recording calls Voice.transcribe and populates the input", async () => {
     vi.mocked(Settings.get).mockResolvedValue({
-      power_mode_enabled: false,
       voice_input_enabled: true,
       voice_output_enabled: false,
     } as never);
