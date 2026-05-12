@@ -174,15 +174,6 @@ export interface SettingsPayload {
   first_run_complete: boolean;
   max_conversation_budget_usd: number | null;
   budget_warning_threshold_pct: number | null;
-  // ── Power Mode (v3) ─────────────────────────────────────────────────────
-  power_mode_enabled: boolean;
-  power_mode_workspace: string;
-  power_mode_model_provider: string;
-  power_mode_model_name: string;
-  power_mode_api_key: string;
-  power_mode_api_key_set: boolean;
-  power_mode_autostart: boolean;
-  power_mode_gateway_port: number;
   auto_update_enabled: boolean;
   // PR 17: voice input (Whisper.cpp) + voice output (Piper)
   voice_input_enabled: boolean;
@@ -665,29 +656,6 @@ export const Usage = {
     api.get<UsageSummary>("/api/usage/summary", { days, group_by: groupBy }),
 };
 
-// ── Power Mode (v3) — Docker / OpenClaw delegation ────────────────────────
-
-export interface DockerStatus {
-  wsl_installed: boolean;
-  docker_installed: boolean;
-  docker_running: boolean;
-  openclaw_running: boolean;
-  openclaw_healthy: boolean;
-  gpu_available: boolean;
-  platform: string;
-  detail: string;
-  last_error: string;
-  gateway_url: string;
-  workspace_dir: string;
-}
-
-export interface ClassifyResult {
-  route: "chat" | "execution";
-  confidence: number;
-  reasoning: string;
-  source: string;
-}
-
 // ── PR 17: Voice (Whisper.cpp STT + Piper TTS) ─────────────────────────────
 
 export interface VoiceAssetsStatus {
@@ -763,30 +731,5 @@ export const Voice = {
     api.post<VoiceAssetsDownloadResult>("/api/voice/assets/download", {
       stt_model_id: stt_model_id ?? "",
       tts_voice_id: tts_voice_id ?? "",
-    }),
-};
-
-export const Docker = {
-  status: () => api.get<DockerStatus>("/api/docker/status"),
-  start: () => api.post<{ ok: boolean; gateway_url?: string; detail?: string }>(
-    "/api/docker/start",
-  ),
-  stop: () => api.post<{ ok: boolean; detail?: string }>("/api/docker/stop"),
-  restart: () => api.post<{ ok: boolean; gateway_url?: string }>("/api/docker/restart"),
-  health: () => api.get<{ ok: boolean; gateway_url: string }>("/api/docker/health"),
-  classify: (user_message: string, conversation_id = "") =>
-    api.post<ClassifyResult>("/api/docker/classify", { user_message, conversation_id }),
-  execute: (conversation_id: string, user_message: string) =>
-    api.post<{ ok: boolean; task_id?: string; error?: string }>(
-      "/api/docker/execute",
-      { conversation_id, user_message },
-    ),
-  cancel: (task_id: string) =>
-    api.post<{ ok: boolean }>("/api/docker/cancel", { task_id }),
-  approve: (task_id: string, approval_id: string, allow: boolean) =>
-    api.post<{ ok: boolean }>("/api/docker/approve", {
-      task_id,
-      approval_id,
-      allow,
     }),
 };
