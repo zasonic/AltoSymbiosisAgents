@@ -282,8 +282,15 @@ try {
     Write-Host ""
 } catch {
     Write-Host ""
-    Write-Err2 $_.Exception.Message
+    Write-Err2 "Error: $($_.Exception.Message)"
     Write-Host ""
-    Write-Host "Setup did not finish cleanly. Read the message above for what to do." -ForegroundColor Yellow
+    Write-Host "--- Where it failed ---" -ForegroundColor Yellow
+    Write-Host $_.InvocationInfo.PositionMessage
+    Write-Host ""
+    Write-Host "--- Script stack trace ---" -ForegroundColor Yellow
+    Write-Host $_.ScriptStackTrace
+    Write-Host ""
+    Write-Host "Setup did not finish cleanly. Copy everything above into a GitHub issue at" -ForegroundColor Yellow
+    Write-Host "https://github.com/zasonic/altosymbiosisagents/issues so we can help." -ForegroundColor Yellow
     exit 1
 }
