@@ -1,4 +1,4 @@
-# dev/install.ps1 - first-run bootstrap for altosybioagents.
+﻿# dev/install.ps1 - first-run bootstrap for altosybioagents.
 #
 # Runs on a clean Windows machine with nothing but PowerShell preinstalled.
 # Installs Node.js LTS, Python 3.12, all npm + pip dependencies, and the
