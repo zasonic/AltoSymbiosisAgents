@@ -56,8 +56,8 @@ class SettingsAPI(BaseAPI):
             "first_run_complete":            self._settings.get("first_run_complete"),
             "max_conversation_budget_usd":   self._settings.get("max_conversation_budget_usd"),
             "budget_warning_threshold_pct":  self._settings.get("budget_warning_threshold_pct"),
-            # Phase 10: silent auto-update toggle.
-            "auto_update_enabled":        bool(self._settings.get("auto_update_enabled")),
+            # Free-shippable v1: tri-state update mechanism ("off" | "auto" | "manual").
+            "update_mechanism":           str(self._settings.get("update_mechanism") or "auto"),
             # PR 17: voice input/output toggles + selected models.
             "voice_input_enabled":        bool(self._settings.get("voice_input_enabled")),
             "voice_output_enabled":       bool(self._settings.get("voice_output_enabled")),

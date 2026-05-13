@@ -1,17 +1,20 @@
 """build-scripts/fetch_bundled_assets.py — populate branding/sidecar-bundle/.
 
-Phase 9 build step (extended in PR 17):
+Phase 9 build step (extended in PR 17, repinned for reproducible builds):
 
-  1. Resolve the **latest** llama.cpp release (per the operator's PR-3 choice
-     to keep the binary current rather than pinning a tag).
-  2. Download the Windows CPU x64 server zip, extract llama-server.exe + the
-     shipped DLLs into branding/sidecar-bundle/llama-server/.
-  3. Hit the Hugging Face metadata endpoint for each catalog model and write
-     branding/sidecar-bundle/bundled_models.json with sha256 + size_bytes.
-  4. PR 17: resolve the latest Whisper.cpp + Piper Windows releases, extract
-     whisper-cli.exe / piper.exe + their DLLs into the sidecar bundle, and
-     write branding/sidecar-bundle/voice_assets.json with the per-model sha256
-     + size for first-run download verification.
+  1. Read build-scripts/bundled_versions.json to learn which pinned tags of
+     llama.cpp, whisper.cpp, and piper to bundle.
+  2. Hit the GitHub releases-by-tag API for each component and download the
+     Windows asset (llama.cpp: Vulkan x64; whisper.cpp: x64; piper: amd64).
+  3. Extract binaries + DLLs into branding/sidecar-bundle/{llama-server,
+     whisper, piper}/.
+  4. Hit the Hugging Face metadata endpoint for each catalog model and write
+     branding/sidecar-bundle/bundled_models.json + voice_assets.json with
+     sha256 + size_bytes for first-run download verification.
+
+Bumping a binary version means editing bundled_versions.json in a commit.
+Never re-tag the repo — the whole point of the pin is that two clones of
+the same git commit produce byte-identical sidecar bundles.
 
 The runtime (services/bundled_server.py + services/voice.py) reads the
 catalogs to validate downloads, and resolves binaries via
@@ -43,16 +46,23 @@ PIPER_DIR = BUNDLE_DIR / "piper"
 CATALOG_PATH = BUNDLE_DIR / "bundled_models.json"
 VOICE_CATALOG_PATH = BUNDLE_DIR / "voice_assets.json"
 
-LLAMACPP_RELEASES_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
-WHISPER_RELEASES_API = "https://api.github.com/repos/ggerganov/whisper.cpp/releases/latest"
-PIPER_RELEASES_API = "https://api.github.com/repos/rhasspy/piper/releases/latest"
+VERSIONS_PATH = Path(__file__).resolve().parent / "bundled_versions.json"
 HF_TREE_API = "https://huggingface.co/api/models/{repo}/tree/main"
 
-# PR 17: HuggingFace bin URL for Whisper.cpp models. Piper voices live on the
-# rhasspy GitHub release pages but the per-voice download is a single .tar.gz
-# wrapping the .onnx + .json — VoiceService streams those at runtime; the
-# build catalog only records expected sha256/size for verification.
-WHISPER_HF_TREE = "https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main"
+# Whisper.cpp moved its source from ggerganov/whisper.cpp to ggml-org/whisper.cpp
+# on GitHub, but the HuggingFace model repo (where the .bin files live) was
+# not migrated — keep the HF lookup pointed at ggerganov for now.
+_WHISPER_HF_REPO = "ggerganov/whisper.cpp"
+
+
+def _load_versions() -> dict:
+    """Load build-scripts/bundled_versions.json once per invocation."""
+    return json.loads(VERSIONS_PATH.read_text(encoding="utf-8"))
+
+
+def _release_tag_url(repo: str, tag: str) -> str:
+    """GitHub API URL for the release at ``tag`` of ``repo``."""
+    return f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
 
 # Catalog of models the wizard's Quick Start can offer. Mirror the ids in
 # backend/services/bundled_server.py:_DEFAULT_MODELS — that file owns the
@@ -96,24 +106,24 @@ def _http_get(url: str, *, accept: str = "application/json") -> bytes:
 
 
 def _resolve_llamacpp_zip_url() -> tuple[str, str]:
-    """Return (release_tag, asset_download_url) for the Windows CPU x64 build."""
-    body = _http_get(LLAMACPP_RELEASES_API)
+    """Return (release_tag, asset_download_url) for the pinned llama.cpp build.
+
+    The component entry in bundled_versions.json supplies ``tag`` and an
+    ``asset_pattern`` with a ``{tag}`` placeholder; we hit the releases-by-tag
+    API and pick the asset whose name matches the formatted pattern exactly.
+    """
+    entry = _load_versions()["llama_cpp"]
+    repo = entry["repo"]
+    tag = entry["tag"]
+    expected_name = entry["asset_pattern"].format(tag=tag)
+    body = _http_get(_release_tag_url(repo, tag))
     data = json.loads(body)
-    tag = data["tag_name"]
-    # llama.cpp publishes per-release archives with names like
-    # "llama-<tag>-bin-win-cpu-x64.zip" or "llama-<tag>-bin-win-x64.zip"; the
-    # exact pattern has shifted over time. Match the first archive whose name
-    # mentions both 'win' and ('cpu' or x64) and ends with .zip.
-    candidates = []
     for asset in data.get("assets", []):
-        name = asset.get("name", "").lower()
-        if "win" in name and name.endswith(".zip") and ("cpu" in name or "x64" in name):
-            candidates.append(asset["browser_download_url"])
-    if not candidates:
-        raise RuntimeError(f"no Windows CPU asset found in release {tag}")
-    # Prefer one that explicitly says cpu — avoid pulling a CUDA-only build.
-    cpu_first = [u for u in candidates if "cpu" in u.lower()]
-    return tag, (cpu_first[0] if cpu_first else candidates[0])
+        if asset.get("name") == expected_name:
+            return tag, asset["browser_download_url"]
+    raise RuntimeError(
+        f"asset {expected_name!r} not found in {repo}@{tag}"
+    )
 
 
 def _extract_llama_server(zip_bytes: bytes, out_dir: Path) -> list[str]:
@@ -164,18 +174,35 @@ def _populate_catalog(models: Iterable[dict]) -> dict[str, dict]:
 # ── PR 17: voice binary fetchers (Whisper.cpp + Piper) ──────────────────────
 
 
-def _resolve_voice_zip_url(api_url: str, *, name_filter: str) -> tuple[str, str]:
-    """Return (release_tag, asset_download_url) for a Windows zip in the
-    referenced GitHub release. ``name_filter`` is matched as a substring
-    against the asset file name (case-insensitive)."""
-    body = _http_get(api_url)
+def _resolve_voice_zip_url(component: str, *, name_filter: str) -> tuple[str, str]:
+    """Return (release_tag, asset_download_url) for the pinned Windows zip of
+    ``component`` (key in bundled_versions.json).
+
+    If the component entry includes ``asset_pattern``, the formatted pattern
+    is matched exactly. Otherwise ``name_filter`` is used as a case-insensitive
+    substring match against Windows .zip assets — kept for whisper.cpp, where
+    the upstream asset name has been stable enough that a substring suffices
+    and pinning the tag is the meaningful guarantee.
+    """
+    entry = _load_versions()[component]
+    repo = entry["repo"]
+    tag = entry["tag"]
+    pattern = entry.get("asset_pattern")
+    expected_name = pattern.format(tag=tag) if pattern else None
+    body = _http_get(_release_tag_url(repo, tag))
     data = json.loads(body)
-    tag = data.get("tag_name", "")
     for asset in data.get("assets", []):
-        name = asset.get("name", "").lower()
-        if name.endswith(".zip") and name_filter in name and "win" in name:
+        name = asset.get("name", "")
+        if expected_name and name == expected_name:
             return tag, asset["browser_download_url"]
-    raise RuntimeError(f"no Windows asset matching {name_filter!r} found in {api_url}")
+        if not expected_name:
+            lower = name.lower()
+            if lower.endswith(".zip") and name_filter in lower and "win" in lower:
+                return tag, asset["browser_download_url"]
+    raise RuntimeError(
+        f"no matching asset for {component} in {repo}@{tag} "
+        f"(pattern={expected_name}, filter={name_filter})"
+    )
 
 
 def _extract_named(zip_bytes: bytes, out_dir: Path,
@@ -205,10 +232,10 @@ def _populate_voice_catalog() -> dict[str, dict]:
     catalog: dict[str, dict] = {"stt": {}, "tts": {}}
 
     for w in WHISPER_MODELS:
-        sha, size = _hf_lookup("ggerganov/whisper.cpp", w["filename"])
+        sha, size = _hf_lookup(_WHISPER_HF_REPO, w["filename"])
         catalog["stt"][w["model_id"]] = {
             "filename":            w["filename"],
-            "repo":                "ggerganov/whisper.cpp",
+            "repo":                _WHISPER_HF_REPO,
             "expected_sha256":     sha,
             "expected_size_bytes": size,
         }
@@ -250,8 +277,8 @@ def _fetch_voice_binaries() -> dict[str, str]:
     that's mixed into the voice catalog as _meta."""
     meta: dict[str, str] = {}
 
-    print("[fetch_bundled_assets] resolving latest whisper.cpp release…")
-    tag, zip_url = _resolve_voice_zip_url(WHISPER_RELEASES_API, name_filter="bin")
+    print("[fetch_bundled_assets] resolving pinned whisper.cpp release…")
+    tag, zip_url = _resolve_voice_zip_url("whisper_cpp", name_filter="bin")
     print(f"[fetch_bundled_assets] whisper.cpp tag {tag}, asset {zip_url}")
     zip_bytes = _http_get(zip_url, accept="application/octet-stream")
     if WHISPER_DIR.exists():
@@ -269,8 +296,8 @@ def _fetch_voice_binaries() -> dict[str, str]:
             )
     meta["whisper_release_tag"] = tag
 
-    print("[fetch_bundled_assets] resolving latest piper release…")
-    tag, zip_url = _resolve_voice_zip_url(PIPER_RELEASES_API, name_filter="windows")
+    print("[fetch_bundled_assets] resolving pinned piper release…")
+    tag, zip_url = _resolve_voice_zip_url("piper", name_filter="windows")
     print(f"[fetch_bundled_assets] piper tag {tag}, asset {zip_url}")
     zip_bytes = _http_get(zip_url, accept="application/octet-stream")
     if PIPER_DIR.exists():
@@ -286,7 +313,7 @@ def _fetch_voice_binaries() -> dict[str, str]:
 
 
 def main() -> int:
-    print("[fetch_bundled_assets] resolving latest llama.cpp release…")
+    print("[fetch_bundled_assets] resolving pinned llama.cpp release…")
     try:
         tag, zip_url = _resolve_llamacpp_zip_url()
     except Exception as exc:

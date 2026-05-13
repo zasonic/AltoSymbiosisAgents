@@ -19,6 +19,12 @@ So a stolen settings file or accidental git commit doesn't leak it.
 The key lives in Windows Credential Manager / macOS Keychain / Linux
 SecretService.
 
+If the OS keyring is unavailable — a headless Linux box without
+SecretService, a misconfigured Keychain, a broken DPAPI — the app
+falls back to plaintext in `settings.json` so it can still function.
+When that happens the status bar shows a yellow "⚠ API key stored in
+plaintext" chip so you know what's in effect.
+
 ## How do I change the Claude model?
 
 Settings → Model → Claude model. Pricing is captured per family

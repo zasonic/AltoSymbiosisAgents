@@ -25,12 +25,24 @@ log = logging.getLogger("altosybioagents.settings")
 SECRET_KEYS: set[str] = {"claude_api_key"}
 KEYRING_SERVICE = "altosybioagents"
 
+# Process-level flag, assumed True until a keyring call actually fails. The
+# /service_status route exposes this via keyring_available() so the renderer
+# can render a "API key stored in plaintext" warning when the OS keyring is
+# unreachable and we've fallen back to settings.json.
+_keyring_available: bool = True
+
+
+def keyring_available() -> bool:
+    """Return False if any keyring call has failed in this process."""
+    return _keyring_available
+
 
 def _keyring_get(key: str) -> str | None:
     # Broad BaseException catch is intentional: some backends (e.g. pyo3-based
     # SecretService on a host missing its native deps) raise PanicException,
     # which derives from BaseException. A broken keyring must never bring the
     # app down — fall back to plaintext silently.
+    global _keyring_available
     try:
         import keyring
         return keyring.get_password(KEYRING_SERVICE, key)
@@ -38,6 +50,7 @@ def _keyring_get(key: str) -> str | None:
         # Warn so the user can diagnose why their API key appears missing.
         # A broken keyring makes stored secrets inaccessible, which looks
         # like an empty API key rather than a configuration problem.
+        _keyring_available = False
         log.warning(
             "keyring.get_password(%s) failed: %s — stored secrets may be "
             "inaccessible. Check your OS keyring/SecretService setup.", key, exc
@@ -46,11 +59,13 @@ def _keyring_get(key: str) -> str | None:
 
 
 def _keyring_set(key: str, value: str) -> bool:
+    global _keyring_available
     try:
         import keyring
         keyring.set_password(KEYRING_SERVICE, key, value)
         return True
     except BaseException as exc:
+        _keyring_available = False
         log.warning("keyring.set_password(%s) failed: %s — falling back to plaintext", key, exc)
         return False
 
@@ -88,6 +103,12 @@ SETTINGS_DEFAULTS: dict[str, tuple] = {
     # the field on a forward-incompatible enum check.
     "local_backend_mode":          (str,   "auto"),
     "bundled_model_id":            (str,   ""),
+    # Set by BundledServer._drain_pipe on the first "offloaded N/M layers to
+    # GPU" line emitted by llama-server. True when N == 0 (the Vulkan build
+    # could not find a usable GPU and fell back to CPU); False otherwise.
+    # The renderer reads this via the settings GET route to surface a
+    # "running on CPU" notice.
+    "bundled_gpu_offload_failed":  (bool,  False),
 
     # Routing
     "routing_enabled":             (bool,  True),
@@ -129,12 +150,19 @@ SETTINGS_DEFAULTS: dict[str, tuple] = {
     "onboarding_step":             (int,   0),
     "last_seen_version":           (str,   ""),
 
-    # Phase 10: silent auto-update (electron-updater). When True, the Electron
-    # main process polls the GitHub publish target every 6h and downloads new
-    # releases in the background. The user is never force-restarted — the
-    # downloaded update only applies after they click "Restart now" in the
-    # UpdateBanner.
-    "auto_update_enabled":         (bool,  True),
+    # Phase 10 → free-shippable v1: tri-state update mechanism.
+    # Valid values: "off" | "auto" | "manual".
+    #   "off"    — never check for updates.
+    #   "auto"   — electron-updater downloads and installs new releases in
+    #              the background. The user clicks "Restart now" in the
+    #              UpdateBanner to apply. Only works if the OS trusts the
+    #              binary (signed, or already opted into via SmartScreen).
+    #   "manual" — main polls the GitHub releases-latest endpoint every 6h
+    #              and shows a banner that links to the download page. The
+    #              user clicks through, downloads the .exe, and installs it
+    #              themselves. Required when auto-install fails because the
+    #              installer is unsigned.
+    "update_mechanism":            (str,   "auto"),
 
     # Token budget (Stage 5)
     "max_conversation_budget_usd":  (float, 5.0),    # stop sending if cumulative cost exceeds this

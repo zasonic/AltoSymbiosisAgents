@@ -67,12 +67,12 @@ jobs:
       - name: Install Python dependencies
         # PyInstaller bakes whatever's installed at build time into the
         # exe, so requirements.txt is the production-shipped bundle.
-        # PyInstaller itself comes from requirements-dev.txt (kept off
-        # the lite installer footprint).
+        # PyInstaller itself is pinned in backend/requirements-build.txt
+        # so local, smoke, and release all use the same version.
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
-          pip install pyinstaller
+          pip install -r backend/requirements-build.txt
 
       - name: Install Node dependencies
         run: npm ci --no-audit --no-fund
@@ -110,9 +110,12 @@ jobs:
         run: |
           $exe = "backend\dist\server\server.exe"
           $logPath = "$env:RUNNER_TEMP\sidecar-stdout.log"
+          $userData = "$env:RUNNER_TEMP\smoke-userdata"
+          New-Item -ItemType Directory -Force -Path $userData | Out-Null
           Write-Host "Launching $exe; capturing stdout to $logPath"
 
           $proc = Start-Process -FilePath $exe `
+              -ArgumentList "--token","smoke-test-token","--user-data","$userData" `
               -RedirectStandardOutput $logPath `
               -RedirectStandardError "$env:RUNNER_TEMP\sidecar-stderr.log" `
               -PassThru `

@@ -137,12 +137,15 @@ export interface AppState {
   // so the wizard can survive a re-mount without losing progress state.
   bundledDownload: BundledDownloadState;
 
-  // Phase 10: silent auto-update banner state. `updateReady` is set when
-  // electron-updater fires "update-downloaded" via IPC; the UpdateBanner
-  // shows until the user clicks "Restart now" or "Later". Dismissal is
-  // session-scoped — never persisted — so the banner reappears on the next
-  // launch if the update is still pending.
-  updateReady: { version: string } | null;
+  // Phase 10 → free-shippable v1: update banner state. In auto mode
+  // `updateReady` is set when electron-updater fires "update-downloaded" and
+  // carries just `{version}`; clicking "Restart now" triggers an in-place
+  // install. In manual mode `updateReady` is set when main's GH-releases
+  // poll finds a newer tag and carries `{version, downloadUrl}`; clicking
+  // "Download" opens the GH releases page in the user's default browser.
+  // Dismissal is session-scoped — never persisted — so the banner reappears
+  // on the next launch if the update is still pending.
+  updateReady: { version: string; downloadUrl?: string } | null;
   updateBannerDismissed: boolean;
 
   // PR 8: per-conversation pending file attachments (ephemeral or
@@ -200,7 +203,7 @@ export interface AppState {
   patchBundledDownload: (patch: Partial<BundledDownloadState>) => void;
 
   // Auto-update banner actions (Phase 10)
-  setUpdateReady: (v: { version: string } | null) => void;
+  setUpdateReady: (v: { version: string; downloadUrl?: string } | null) => void;
   setUpdateBannerDismissed: (b: boolean) => void;
 
   // Pending attachment actions (PR 8)

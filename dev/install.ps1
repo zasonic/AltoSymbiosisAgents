@@ -234,8 +234,8 @@ try {
     Write-Step "Installing npm dependencies (this can take a few minutes)"
     Push-Location $ProjectRoot
     try {
-        & npm install --no-fund --no-audit --loglevel=error
-        if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
+        & npm ci --no-fund --no-audit --loglevel=error
+        if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
     } finally {
         Pop-Location
     }
@@ -264,8 +264,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "pip install -r backend\requirements.txt failed" }
 
     Write-Step "Installing PyInstaller (bundled in dev so dev\build-installer.bat can run without re-installing)"
-    & $venvPython -m pip install --timeout=1000 --retries=20 --no-cache-dir --only-binary=":all:" "pyinstaller==6.11.1"
-    if ($LASTEXITCODE -ne 0) { throw "pip install pyinstaller failed" }
+    $buildReqs = Join-Path $ProjectRoot "backend\requirements-build.txt"
+    & $venvPython -m pip install --timeout=1000 --retries=20 --no-cache-dir --only-binary=":all:" -r "$buildReqs"
+    if ($LASTEXITCODE -ne 0) { throw "pip install -r backend\requirements-build.txt failed" }
 
     # ── Smoke test ───────────────────────────────────────────────────────────
     Write-Step "Verifying imports"

@@ -363,8 +363,22 @@ class API:
         return model
 
     def service_status(self) -> dict:
-        """Return a snapshot of per-service init status for the UI."""
-        return {name: dict(entry) for name, entry in self._status.items()}
+        """Return a snapshot of per-service init status for the UI.
+
+        Includes a synthetic ``keyring`` entry whose ``ok`` reflects whether
+        any keyring call has failed in this process. When ``ok`` is False, the
+        Anthropic API key (and any other secrets) live in plaintext in
+        settings.json rather than the OS keyring; the StatusBar surfaces this
+        as a warning chip so the user can decide whether to act.
+        """
+        from core.settings import keyring_available
+        out = {name: dict(entry) for name, entry in self._status.items()}
+        available = keyring_available()
+        out["keyring"] = {
+            "ok": available,
+            "error": None if available else "API key stored in plaintext (OS keyring unavailable)",
+        }
+        return out
 
     # ── Event emission ───────────────────────────────────────────────────────
 

@@ -15,6 +15,20 @@ You will need:
 - [Ollama](https://ollama.com/download) or [LM Studio](https://lmstudio.ai/)
   for local models (optional but recommended — keeps simple messages free).
 
+## Trust
+
+The installer is **not code-signed**. Windows shows "Windows protected
+your PC" on first run — click **More info → Run anyway**. See
+[docs/img/smartscreen.png](docs/img/smartscreen.png) for the exact
+dialog. Subsequent launches go straight to the app.
+
+If you're a cautious user:
+
+- Source is here on GitHub. License: [MIT](LICENSE).
+- Security boundaries, threat model, and reporting: [SECURITY.md](SECURITY.md).
+- Build the installer from this commit and check the SHA256 matches the
+  one in the release notes: [docs/DEVELOPMENT.md → Reproducible builds](docs/DEVELOPMENT.md).
+
 ## Run
 
 Open the app, paste your API key in Settings, and start chatting. Messages
@@ -47,6 +61,6 @@ Deeper docs:
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common errors.
 - [docs/FAQ.md](docs/FAQ.md) — common questions.
 - [docs/legacy.md](docs/legacy.md) — pre-v6 code lives on the legacy/v5 branch.
-- [BENCHMARKS.md](BENCHMARKS.md) — AgentDojo ASR vs the published baseline, refreshed every push to `main`.
+- [CHANGELOG.md](CHANGELOG.md) — user-facing changes per release.
 
 MIT — see [LICENSE](LICENSE).
