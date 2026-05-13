@@ -1,5 +1,5 @@
 @echo off
-REM dev\build-installer.bat — full installer build pipeline.
+REM dev\build-installer.bat - full installer build pipeline.
 REM
 REM 1. Activate backend venv
 REM 2. PyInstaller --onedir into backend\dist\server\
@@ -24,7 +24,7 @@ if not exist "node_modules\electron-builder\package.json" (
 )
 
 echo ==^> [1/6] Building Python sidecar with PyInstaller (onedir)
-REM Invoke the venv python directly — `call activate.bat` swallows errors and
+REM Invoke the venv python directly - `call activate.bat` swallows errors and
 REM can leave PATH pointing at the system Python on some Windows configurations.
 pushd backend
 ".venv\Scripts\python.exe" -m PyInstaller pyinstaller.spec --noconfirm --clean
