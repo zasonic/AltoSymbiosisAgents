@@ -81,6 +81,11 @@ _PARTIAL_SUFFIX = ".partial"
 _DOWNLOAD_TIMEOUT_SEC = 60
 _DOWNLOAD_CHUNK_SIZE = 1 << 20  # 1 MiB
 _PORT_PATTERN = re.compile(r"listening (?:on|at) [^:]+:(\d{2,5})", re.IGNORECASE)
+# Matches the llama.cpp boot line that summarises how many model layers were
+# loaded into GPU memory. We scan for it once per process to set
+# bundled_gpu_offload_failed so the renderer can warn when the Vulkan build
+# silently falls back to CPU.
+_GPU_OFFLOAD_RE = re.compile(r"offloaded (\d+)/(\d+) layers to GPU")
 
 
 class BundledServerError(Exception):
@@ -181,6 +186,10 @@ class BundledServer:
         self._proc: subprocess.Popen | None = None
         self._port: int | None = None
         self._model_id: str | None = None
+        # Set to True after the first "offloaded N/M layers to GPU" line is
+        # parsed from llama-server stdout so we only write the
+        # bundled_gpu_offload_failed setting once per process lifetime.
+        self._gpu_offload_detected: bool = False
 
     # ── Catalog ──────────────────────────────────────────────────────────────
 
@@ -370,8 +379,13 @@ class BundledServer:
                 "-m", str(model_path),
                 "--host", "127.0.0.1",
                 "--port", str(port),
-                "--ctx-size", "8192",
-                "--n-gpu-layers", "0",
+                "--ctx-size", "16384",
+                # 99 means "all layers" — llama.cpp clamps to the model's
+                # actual layer count. The Vulkan build picks up any
+                # NVIDIA/AMD/Intel GPU; on a machine without a usable GPU
+                # llama.cpp falls back to CPU and reports 0 layers offloaded
+                # (caught by _drain_pipe → bundled_gpu_offload_failed).
+                "--n-gpu-layers", "99",
             ]
 
             try:
@@ -402,10 +416,14 @@ class BundledServer:
             except OSError as exc:
                 log.warning("bundled: could not write port file: %s", exc)
 
+            # Reset the offload-detection flag so a restart of the bundled
+            # server (e.g. after swapping models) re-evaluates GPU offload.
+            self._gpu_offload_detected = False
+
             # Drain stdout in a daemon thread so the pipe never blocks.
             threading.Thread(
-                target=_drain_pipe,
-                args=(proc, log),
+                target=self._drain_pipe,
+                args=(proc,),
                 daemon=True,
                 name="bundled-server-stdout",
             ).start()
@@ -465,6 +483,41 @@ class BundledServer:
         except Exception as exc:  # noqa: BLE001
             log.debug("bundled: could not update last_loaded_at: %s", exc)
 
+    def _drain_pipe(self, proc: subprocess.Popen) -> None:
+        """Forward llama-server stdout/stderr into our log so the user can
+        diagnose startup failures via app.log without staring at a terminal.
+
+        On the first ``offloaded N/M layers to GPU`` line seen per process
+        lifetime, update the ``bundled_gpu_offload_failed`` setting so the
+        renderer can surface a "running on CPU" notice when N == 0.
+        """
+        if proc.stdout is None:
+            return
+        try:
+            for line in proc.stdout:
+                line = line.rstrip()
+                if not line:
+                    continue
+                log.info("[llama-server] %s", line)
+                if self._gpu_offload_detected:
+                    continue
+                m = _GPU_OFFLOAD_RE.search(line)
+                if not m:
+                    continue
+                offloaded = int(m.group(1))
+                total = int(m.group(2))
+                if offloaded == 0:
+                    log.warning(
+                        "bundled: llama-server reported 0/%d layers offloaded "
+                        "to GPU — running on CPU only.", total,
+                    )
+                    self._settings.set("bundled_gpu_offload_failed", True)
+                else:
+                    self._settings.set("bundled_gpu_offload_failed", False)
+                self._gpu_offload_detected = True
+        except Exception as exc:  # noqa: BLE001
+            log.debug("bundled: stdout drain ended: %s", exc)
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -482,17 +535,3 @@ def _safe_unlink(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError as exc:
         log.debug("bundled: could not unlink %s: %s", path, exc)
-
-
-def _drain_pipe(proc: subprocess.Popen, logger: logging.Logger) -> None:
-    """Forward llama-server stdout/stderr into our log so the user can
-    diagnose startup failures via app.log without staring at a terminal."""
-    if proc.stdout is None:
-        return
-    try:
-        for line in proc.stdout:
-            line = line.rstrip()
-            if line:
-                logger.info("[llama-server] %s", line)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("bundled: stdout drain ended: %s", exc)

@@ -58,9 +58,15 @@ export interface ElectronAPI {
 
   /** Subscribe to sidecar lifecycle changes; returns an unsubscribe fn. */
   onSidecarStatus: (handler: (status: SidecarStatus) => void) => () => void;
-  /** Subscribe to "update available" notifications from electron-updater. */
+  /**
+   * Subscribe to "update available" notifications. In auto mode the payload
+   * carries {version, notesUrl}. In manual mode (update_mechanism="manual")
+   * the payload also includes {downloadUrl}, signalling the UpdateBanner to
+   * render a "Download" button that opens the GH releases page instead of
+   * a "Restart now" button that triggers an in-place install.
+   */
   onUpdateAvailable: (
-    handler: (info: { version: string; notesUrl?: string }) => void,
+    handler: (info: { version: string; notesUrl?: string; downloadUrl?: string }) => void,
   ) => () => void;
   /** Subscribe to "update downloaded" notifications. */
   onUpdateDownloaded: (handler: (info: { version: string }) => void) => () => void;
@@ -92,7 +98,7 @@ const api: ElectronAPI = {
   onUpdateAvailable: (handler) => {
     const wrapped = (
       _e: Electron.IpcRendererEvent,
-      info: { version: string; notesUrl?: string },
+      info: { version: string; notesUrl?: string; downloadUrl?: string },
     ) => handler(info);
     ipcRenderer.on("update:available", wrapped);
     return () => ipcRenderer.removeListener("update:available", wrapped);

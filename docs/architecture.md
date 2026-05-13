@@ -33,7 +33,7 @@ Three processes, one user-facing app.
   ambiguous routes.
 - `services/security_engine.py` — quarantine, deterministic rule
   enforcement, risk ledger.
-- `services/memory.py` — buffer, fact store, RAG retrieval.
+- `services/memory/` — buffer, fact store, RAG retrieval (package).
 - `services/governance.py` — per-agent tool/budget policy.
 - `services/qwen_thinking.py` — Qwen3 hybrid /think + /no_think paths.
 
@@ -69,7 +69,7 @@ mapping tables that join on opaque IDs to the source rows.
 
 ## User-facing labels
 
-`backend/core/labels.py` and `desktop-ui/i18n/en.json` map internal
-names (table names, service names) to display strings. The internal
-names stay frozen so existing user databases keep working; only the
-display strings travel out to the UI.
+`desktop-ui/i18n/en.json` maps internal names (table names, service
+names) to display strings. The internal names stay frozen so existing
+user databases keep working; only the display strings travel out to
+the UI.

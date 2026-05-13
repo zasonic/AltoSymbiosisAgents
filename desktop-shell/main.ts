@@ -349,26 +349,30 @@ interface SidecarHttpInfo {
   token: string;
 }
 
-async function fetchAutoUpdateEnabled(info: SidecarHttpInfo): Promise<boolean> {
+type UpdateMechanism = "off" | "auto" | "manual";
+
+async function fetchUpdateMechanism(info: SidecarHttpInfo): Promise<UpdateMechanism> {
   // Pulled in main rather than via wireSidecarAuthHeader: that hook only
   // augments the renderer session, not main-process fetch. Keep this
   // best-effort — a hung sidecar must not block update polling forever,
-  // so a 2s timeout returns the spec-mandated `true` fallback instead.
+  // so a 2s timeout returns the "auto" fallback instead.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 2_000);
   try {
     const res = await fetch(
-      `http://127.0.0.1:${info.port}/api/settings/get?key=auto_update_enabled`,
+      `http://127.0.0.1:${info.port}/api/settings/get?key=update_mechanism`,
       {
         headers: { Authorization: `Bearer ${info.token}` },
         signal: controller.signal,
       },
     );
-    if (!res.ok) return true;
+    if (!res.ok) return "auto";
     const body = (await res.json()) as { value?: unknown };
-    return body.value !== false;
+    const v = body.value;
+    if (v === "off" || v === "auto" || v === "manual") return v;
+    return "auto";
   } catch {
-    return true;
+    return "auto";
   } finally {
     clearTimeout(timer);
   }
@@ -378,21 +382,92 @@ async function fetchAutoUpdateEnabled(info: SidecarHttpInfo): Promise<boolean> {
 // publish target in electron-builder.yml is the source of truth; this
 // constant must mirror it. Keep in sync if the publish section ever moves.
 const RELEASE_NOTES_BASE = "https://github.com/zasonic/altosybioagents/releases/tag";
+const LATEST_RELEASE_API = "https://api.github.com/repos/zasonic/altosybioagents/releases/latest";
+const UPDATE_POLL_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+function parseSemver(v: string): [number, number, number] | null {
+  // Accepts "1.2.3", "v1.2.3", "1.2.3-test", "1.2.3-test-2", etc. Pre-release
+  // suffixes are dropped for the comparison — they're only meaningful to the
+  // user reading the release notes, not to "is this newer than installed?".
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+function isStrictlyNewer(remote: string, installed: string): boolean {
+  const a = parseSemver(remote);
+  const b = parseSemver(installed);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] > b[i]) return true;
+    if (a[i] < b[i]) return false;
+  }
+  return false;
+}
+
+interface GhRelease {
+  tag_name?: string;
+  assets?: { name?: string; browser_download_url?: string }[];
+}
+
+async function checkManualUpdate(): Promise<void> {
+  // Manual mode polls the public GH API directly — no auth needed. A failure
+  // here (network, rate limit, GH outage) is silent so an offline run doesn't
+  // spam the user with banners.
+  try {
+    const res = await fetch(LATEST_RELEASE_API, {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!res.ok) return;
+    const body = (await res.json()) as GhRelease;
+    const tag = body.tag_name ?? "";
+    if (!tag || !isStrictlyNewer(tag, app.getVersion())) return;
+    const exeAsset = (body.assets ?? []).find(
+      (a) => typeof a.name === "string" && a.name.toLowerCase().endsWith(".exe"),
+    );
+    const downloadUrl = exeAsset?.browser_download_url;
+    if (!downloadUrl) return;
+    const version = tag.replace(/^v/, "");
+    mainWindow?.webContents.send("update:available", {
+      version,
+      notesUrl: `${RELEASE_NOTES_BASE}/${tag}`,
+      downloadUrl,
+    });
+  } catch (err) {
+    logToFile(`manual update check failed: ${err instanceof Error ? err.message : err}\n`);
+  }
+}
 
 async function wireAutoUpdater(): Promise<void> {
   if (!app.isPackaged) return;
 
+  const info = sidecar?.getInfo();
+  const mechanism: UpdateMechanism = info ? await fetchUpdateMechanism(info) : "auto";
+  if (mechanism === "off") return;
+
+  if (mechanism === "manual") {
+    // No electron-updater listeners in manual mode — the manual path doesn't
+    // download anything in-process. checkManualUpdate emits update:available
+    // with a downloadUrl, and the UpdateBanner switches to "Download" mode.
+    checkManualUpdate().catch(() => {});
+    updaterTimer = setInterval(() => {
+      checkManualUpdate().catch(() => {});
+    }, UPDATE_POLL_INTERVAL_MS);
+    return;
+  }
+
+  // mechanism === "auto"
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
-  autoUpdater.on("update-available", (info) => {
+  autoUpdater.on("update-available", (autoInfo) => {
     mainWindow?.webContents.send("update:available", {
-      version: info.version,
-      notesUrl: `${RELEASE_NOTES_BASE}/v${info.version}`,
+      version: autoInfo.version,
+      notesUrl: `${RELEASE_NOTES_BASE}/v${autoInfo.version}`,
     });
   });
-  autoUpdater.on("update-downloaded", (info) => {
-    mainWindow?.webContents.send("update:downloaded", { version: info.version });
+  autoUpdater.on("update-downloaded", (autoInfo) => {
+    mainWindow?.webContents.send("update:downloaded", { version: autoInfo.version });
   });
   autoUpdater.on("error", (err) => {
     // Log only — surfacing this via a dialog would break the
@@ -401,20 +476,13 @@ async function wireAutoUpdater(): Promise<void> {
     logToFile(`autoUpdater error: ${err.message}\n`);
   });
 
-  // Honour the user's auto_update_enabled toggle. The fetch is best-effort:
-  // if the sidecar isn't responding yet (cold start, crash) we fall back to
-  // enabled=true and let the renderer flip the toggle off on next launch.
-  const info = sidecar?.getInfo();
-  const enabled = info ? await fetchAutoUpdateEnabled(info) : true;
-  if (!enabled) return;
-
   // Check on launch and every 6 hours. Hold the interval handle so we can
   // clear it on quit (otherwise it keeps a reference to autoUpdater alive
   // and prevents clean process exit on some Electron versions).
   autoUpdater.checkForUpdatesAndNotify().catch(() => {});
   updaterTimer = setInterval(() => {
     autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-  }, 6 * 60 * 60 * 1000);
+  }, UPDATE_POLL_INTERVAL_MS);
 }
 
 async function bootSidecar(userDataDir: string): Promise<void> {

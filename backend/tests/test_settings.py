@@ -206,15 +206,17 @@ class TestPersistence:
         assert data["_internal_runtime_key"] == "runtime_value"
 
 
-# ── Phase 10: silent auto-update toggle ───────────────────────────────────────
+# ── Free-shippable v1: update_mechanism tri-state ─────────────────────────────
 
-class TestAutoUpdateEnabled:
-    def test_auto_update_enabled_defaults_to_true(self, tmp_path):
-        """New installs opt into background update checks by default."""
+class TestUpdateMechanism:
+    def test_update_mechanism_defaults_to_auto(self, tmp_path):
+        """New installs default to background auto-update."""
         s, _ = make_settings(tmp_path)
-        assert s.get("auto_update_enabled") is True
+        assert s.get("update_mechanism") == "auto"
 
-    def test_auto_update_enabled_persists_when_disabled(self, tmp_path):
+    def test_update_mechanism_accepts_off_and_manual(self, tmp_path):
         s, _ = make_settings(tmp_path)
-        s.set("auto_update_enabled", False)
-        assert s.get("auto_update_enabled") is False
+        s.set("update_mechanism", "off")
+        assert s.get("update_mechanism") == "off"
+        s.set("update_mechanism", "manual")
+        assert s.get("update_mechanism") == "manual"

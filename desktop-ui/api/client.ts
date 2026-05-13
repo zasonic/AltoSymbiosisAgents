@@ -174,7 +174,7 @@ export interface SettingsPayload {
   first_run_complete: boolean;
   max_conversation_budget_usd: number | null;
   budget_warning_threshold_pct: number | null;
-  auto_update_enabled: boolean;
+  update_mechanism: "off" | "auto" | "manual";
   // PR 17: voice input (Whisper.cpp) + voice output (Piper)
   voice_input_enabled: boolean;
   voice_output_enabled: boolean;

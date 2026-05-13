@@ -61,6 +61,37 @@ On Windows, `dev\build-installer.bat` chains all three and produces
 `dist/altosybioagents-Setup-<version>.exe`. Test the installer on a clean
 VM (no Python, no Node).
 
+## Reproducible builds
+
+The installer is intended to be reproducible: anyone with a Windows box,
+Node 20+, and Python 3.12+ can build the same `.exe` from the same git
+commit. To verify a release you downloaded matches the one that was tagged:
+
+```
+git clone https://github.com/zasonic/altosybioagents.git
+cd altosybioagents
+git checkout v<x.y.z>          # the tag for the release you have
+dev\build-installer.bat        # builds dist\altosybioagents-Setup-<x.y.z>.exe
+Get-FileHash dist\*.exe -Algorithm SHA256
+```
+
+The release notes for the matching tag list the SHA256 of the published
+installer. The hash from `Get-FileHash` should be identical. If it isn't,
+please open an issue — either there is a non-deterministic input we missed
+(file me one as a bug) or the release was published from a different
+source state (file me one as a security concern).
+
+What's pinned to make this work:
+- JS deps in `package-lock.json` (the build uses `npm ci`).
+- Python deps in `backend/requirements.txt`.
+- PyInstaller in `backend/requirements-build.txt`.
+- llama.cpp / whisper.cpp / piper binaries in
+  `build-scripts/bundled_versions.json` (tag + asset name).
+
+Bumping any of those means editing the file in a commit. Never re-tag a
+release: the whole point of the pin is that `git checkout v1.0.0` today
+fetches the same upstream binaries it did the day v1.0.0 was published.
+
 ## Code style
 
 - TypeScript: strict mode; no `any` unless commented why.

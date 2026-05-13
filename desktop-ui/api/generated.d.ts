@@ -48,11 +48,6 @@ export interface AgentUpdateIn {
     [k: string]: unknown;
   };
 }
-export interface ApproveIn {
-  task_id: string;
-  approval_id: string;
-  allow: boolean;
-}
 export interface AssetsDownloadIn {
   stt_model_id?: string;
   tts_voice_id?: string;
@@ -62,9 +57,6 @@ export interface BundledDownloadIn {
 }
 export interface BundledStartIn {
   model_id?: string;
-}
-export interface CancelIn {
-  task_id: string;
 }
 export interface ChatBranchIn {
   conversation_id: string;
@@ -94,10 +86,6 @@ export interface ChatThinkingIn {
   user_message: string;
   budget_tokens?: number;
 }
-export interface ClassifyIn {
-  user_message: string;
-  conversation_id?: string;
-}
 export interface DocumentSearchIn {
   query: string;
   top_k?: number;
@@ -113,10 +101,6 @@ export interface EchoOut {
 export interface EnabledIn {
   server_id: string;
   enabled: boolean;
-}
-export interface ExecuteIn {
-  conversation_id: string;
-  user_message: string;
 }
 export interface FetchModelsIn {
   backend: string;

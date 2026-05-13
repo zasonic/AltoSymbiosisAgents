@@ -272,21 +272,43 @@ export function SettingsPanel() {
 
       <section className="card">
         <h3 className="font-semibold mb-2">Updates</h3>
-        <label className="flex items-start gap-2">
-          <input
-            type="checkbox"
-            className="mt-1"
-            checked={!!config.auto_update_enabled}
-            onChange={(e) => save("auto_update_enabled", e.target.checked)}
-          />
-          <span className="text-sm">
-            <div>Automatic updates</div>
-            <div className="text-xs text-ink-dim">
-              Check for new versions in the background. Never restarts without
-              your permission.
-            </div>
-          </span>
-        </label>
+        <div className="flex flex-col gap-2" role="radiogroup" aria-label="Update mechanism">
+          {([
+            {
+              value: "auto",
+              label: "Automatic (recommended)",
+              hint: "Download and install new versions in the background. Asks before restarting.",
+            },
+            {
+              value: "manual",
+              label: "Manual",
+              hint: "Notify me when a new version is out and open the download page so I can install it myself.",
+            },
+            {
+              value: "off",
+              label: "Off",
+              hint: "Never check for updates.",
+            },
+          ] as const).map((opt) => (
+            <label key={opt.value} className="flex items-start gap-2">
+              <input
+                type="radio"
+                name="update_mechanism"
+                className="mt-1"
+                checked={(config.update_mechanism ?? "auto") === opt.value}
+                onChange={() => save("update_mechanism", opt.value)}
+              />
+              <span className="text-sm">
+                <div>{opt.label}</div>
+                <div className="text-xs text-ink-dim">{opt.hint}</div>
+              </span>
+            </label>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-ink-dim">
+          Manual mode is useful if automatic updates fail on your machine
+          because the app is unsigned.
+        </p>
       </section>
 
       <section className="card" data-testid="settings-voice-section">

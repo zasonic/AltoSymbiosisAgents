@@ -47,7 +47,6 @@ DEFAULT_OUTPUT = REPO_ROOT / "desktop-ui" / "api" / "generated.d.ts"
 _SOURCE_MODULES: tuple[str, ...] = (
     "routes.agents",
     "routes.chat",
-    "routes.docker",
     "routes.echo",
     "routes.lifecycle",
     "routes.mcp",

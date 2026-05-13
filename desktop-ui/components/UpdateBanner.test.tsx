@@ -16,12 +16,15 @@ beforeEach(() => {
     false,
   );
   // jsdom doesn't ship a window.electronAPI; stub the bits the banner uses.
-  // onUpdateDownloaded returns its unsubscribe handle, mirroring the real
-  // preload bridge contract so the effect's cleanup path doesn't blow up.
+  // Both onUpdateDownloaded and onUpdateAvailable return their unsubscribe
+  // handle, mirroring the real preload bridge contract so the effect's
+  // cleanup path doesn't blow up.
   Object.assign(window, {
     electronAPI: {
       onUpdateDownloaded: vi.fn().mockReturnValue(() => {}),
+      onUpdateAvailable: vi.fn().mockReturnValue(() => {}),
       installUpdate: vi.fn().mockResolvedValue(undefined),
+      openExternal: vi.fn().mockResolvedValue(undefined),
     },
   });
 });
@@ -60,5 +63,22 @@ describe("UpdateBanner", () => {
     await userEvent.click(screen.getByRole("button", { name: /later/i }));
     expect(useAppStore.getState().updateBannerDismissed).toBe(true);
     expect(screen.queryByTestId("update-banner")).toBeNull();
+  });
+
+  it("manual mode renders a Download button that opens the release URL", async () => {
+    useAppStore.setState({
+      updateReady: {
+        version: "5.1.0",
+        downloadUrl: "https://github.com/zasonic/altosybioagents/releases/download/v5.1.0/altosybioagents-Setup-5.1.0.exe",
+      },
+    });
+    render(<UpdateBanner />);
+
+    expect(screen.getByText(/Download to install/i)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /download v5\.1\.0/i }));
+    expect(window.electronAPI.openExternal).toHaveBeenCalledWith(
+      "https://github.com/zasonic/altosybioagents/releases/download/v5.1.0/altosybioagents-Setup-5.1.0.exe",
+    );
+    expect(window.electronAPI.installUpdate).not.toHaveBeenCalled();
   });
 });
