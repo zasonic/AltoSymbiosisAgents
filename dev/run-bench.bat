@@ -1,10 +1,10 @@
 @echo off
-REM dev\run-bench.bat — local AgentDojo bench runner.
+REM dev\run-bench.bat - local AgentDojo bench runner.
 REM
 REM Activates the project venv, installs the bench-only deps from
 REM backend\requirements-bench.txt, runs all four suites, and regenerates
 REM BENCHMARKS.md. The workflow that runs in CI lives at
-REM .github\workflows\security-bench.yml — this script mirrors its steps
+REM .github\workflows\security-bench.yml - this script mirrors its steps
 REM so contributors can reproduce the published numbers locally.
 REM
 REM Pre-reqs:

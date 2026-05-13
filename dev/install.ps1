@@ -1,4 +1,4 @@
-# dev/install.ps1 — first-run bootstrap for altosybioagents.
+﻿# dev/install.ps1 - first-run bootstrap for altosybioagents.
 #
 # Runs on a clean Windows machine with nothing but PowerShell preinstalled.
 # Installs Node.js LTS, Python 3.12, all npm + pip dependencies, and the
@@ -27,7 +27,7 @@ $PYTHON_MIN = [Version]"3.12"
 $NODE_MSI_FALLBACK = "https://nodejs.org/dist/v20.18.1/node-v20.18.1-x64.msi"
 $PYTHON_EXE_FALLBACK = "https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe"
 
-# ── Pretty printing ──────────────────────────────────────────────────────────
+# -- Pretty printing ----------------------------------------------------------
 
 function Write-Step($text)  { Write-Host "==> $text" -ForegroundColor Cyan }
 function Write-Ok($text)    { Write-Host "[ok] $text" -ForegroundColor Green }
@@ -59,7 +59,7 @@ function Test-Command($name) {
     return ($null -ne $cmd)
 }
 
-# ── Download with fallback chain ─────────────────────────────────────────────
+# -- Download with fallback chain ---------------------------------------------
 
 function Download-File($Url, $Out) {
     Write-Host "    downloading $Url"
@@ -98,7 +98,7 @@ function Download-File($Url, $Out) {
     return $false
 }
 
-# ── Node.js ──────────────────────────────────────────────────────────────────
+# -- Node.js ------------------------------------------------------------------
 
 function Get-NodeMajor {
     if (-not (Test-Command "node")) { return 0 }
@@ -145,7 +145,7 @@ function Install-Node {
     Write-Ok "Node.js installed via MSI"
 }
 
-# ── Python ───────────────────────────────────────────────────────────────────
+# -- Python -------------------------------------------------------------------
 
 function Get-PythonExe {
     foreach ($name in @("python", "python3", "py")) {
@@ -192,7 +192,7 @@ function Install-Python {
     Write-Ok "Python installed"
 }
 
-# ── Verification helpers ─────────────────────────────────────────────────────
+# -- Verification helpers -----------------------------------------------------
 
 function Assert-Tool($name, $hint) {
     if (-not (Test-Command $name)) {
@@ -200,10 +200,10 @@ function Assert-Tool($name, $hint) {
     }
 }
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# -- Main ---------------------------------------------------------------------
 
 try {
-    Write-Step "altosybioagents setup — verifying prerequisites"
+    Write-Step "altosybioagents setup - verifying prerequisites"
     Refresh-Path
 
     # Node
@@ -230,7 +230,7 @@ try {
         Write-Ok "Python $pyv detected ($py)"
     }
 
-    # ── npm install ──────────────────────────────────────────────────────────
+    # -- npm install ----------------------------------------------------------
     Write-Step "Installing npm dependencies (this can take a few minutes)"
     Push-Location $ProjectRoot
     try {
@@ -241,7 +241,7 @@ try {
     }
     Write-Ok "npm dependencies installed"
 
-    # ── Python venv ──────────────────────────────────────────────────────────
+    # -- Python venv ----------------------------------------------------------
     Write-Step "Creating Python virtualenv at backend/.venv"
     $venvDir = Join-Path $ProjectRoot "backend\.venv"
     if (-not (Test-Path $venvDir)) {
@@ -268,7 +268,7 @@ try {
     & $venvPython -m pip install --timeout=1000 --retries=20 --no-cache-dir --only-binary=":all:" -r "$buildReqs"
     if ($LASTEXITCODE -ne 0) { throw "pip install -r backend\requirements-build.txt failed" }
 
-    # ── Smoke test ───────────────────────────────────────────────────────────
+    # -- Smoke test -----------------------------------------------------------
     Write-Step "Verifying imports"
     & $venvPython -c 'import fastapi, uvicorn, anthropic, keyring, pydantic; print("imports ok")'
     if ($LASTEXITCODE -ne 0) { throw "Sidecar imports failed inside the venv." }
@@ -282,8 +282,15 @@ try {
     Write-Host ""
 } catch {
     Write-Host ""
-    Write-Err2 $_.Exception.Message
+    Write-Err2 "Error: $($_.Exception.Message)"
     Write-Host ""
-    Write-Host "Setup did not finish cleanly. Read the message above for what to do." -ForegroundColor Yellow
+    Write-Host "--- Where it failed ---" -ForegroundColor Yellow
+    Write-Host $_.InvocationInfo.PositionMessage
+    Write-Host ""
+    Write-Host "--- Script stack trace ---" -ForegroundColor Yellow
+    Write-Host $_.ScriptStackTrace
+    Write-Host ""
+    Write-Host "Setup did not finish cleanly. Copy everything above into a GitHub issue at" -ForegroundColor Yellow
+    Write-Host "https://github.com/zasonic/altosymbiosisagents/issues so we can help." -ForegroundColor Yellow
     exit 1
 }
