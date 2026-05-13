@@ -8,7 +8,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
 import type { Attachment, PromptTemplate } from "@/api/client";
-import type { SidecarStatus } from "../../desktop-shell/sidecar";
+import type { SidecarStatus } from "../../desktop-shell/sidecar-types";
 
 export type ActiveView =
   | "chat"

@@ -194,7 +194,7 @@ class SettingsAPI(BaseAPI):
         """Return current model pricing (defaults + any user overrides).
 
         Defaults come from the catalog's ``family_fallback_prices`` so
-        ``backend/config/models.json`` remains the single source of truth.
+        ``core/config/models.json`` remains the single source of truth.
         Per-family user overrides via ``settings.model_prices`` still
         flow through unchanged.
         """

@@ -6,7 +6,7 @@
 
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { SidecarStatus } from "./sidecar";
+import type { SidecarStatus } from "./sidecar-types";
 
 export interface SidecarInfo {
   port: number;
@@ -87,6 +87,16 @@ export interface ElectronAPI {
    * --version` afterwards.
    */
   installMiniconda: () => Promise<{ ok: true; target: string }>;
+  /**
+   * DEV-ONLY: build <userData>/bin/sidecar-venv from the previously-installed
+   * Miniconda, then pip-install backend/ into it (editable in dev). Run after
+   * installMiniconda() succeeds. Refused when app.isPackaged === true;
+   * removed in commit 4. From the dev console:
+   *   await window.electronAPI.installSidecarVenv()
+   * After it resolves, isBootstrapped() should return true and the chat UI
+   * should appear on next relaunch.
+   */
+  installSidecarVenv: () => Promise<{ ok: true; sourceDir: string }>;
 
   /** Subscribe to sidecar lifecycle changes; returns an unsubscribe fn. */
   onSidecarStatus: (handler: (status: SidecarStatus) => void) => () => void;
@@ -126,6 +136,7 @@ const api: ElectronAPI = {
   recheckBootstrap: () => ipcRenderer.invoke("app:recheck-bootstrap"),
   getPlatform: () => ipcRenderer.invoke("app:platform"),
   installMiniconda: () => ipcRenderer.invoke("bootstrap:install-miniconda"),
+  installSidecarVenv: () => ipcRenderer.invoke("bootstrap:install-sidecar-venv"),
 
   onSidecarStatus: (handler) => {
     const wrapped = (_e: Electron.IpcRendererEvent, status: SidecarStatus) => handler(status);

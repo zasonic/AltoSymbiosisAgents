@@ -15,8 +15,9 @@ import { writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { getBinRoot, isBootstrapped } from "./bootstrap/bin_manager";
+import { getBinRoot, getResourceDir, isBootstrapped } from "./bootstrap/bin_manager";
 import { downloadAndInstallMiniconda } from "./bootstrap/miniconda";
+import { createSidecarVenv } from "./bootstrap/sidecar_venv";
 import { SidecarManager } from "./sidecar";
 
 // Only meaningful in development — `resolveSpawnArgs` consults this to find
@@ -356,6 +357,24 @@ function wireIpc(): void {
     // re-runs the smoke test against the freshly-installed Miniconda.
     bootstrappedCache = null;
     return { ok: true, target };
+  });
+
+  // Dev-only sidecar-venv installer hook for commit-3 manual verification.
+  // Runs venv create + pip self-upgrade + pip install of the sidecar package
+  // from <projectRoot>/backend (editable in dev). Commit 4's `bootstrap:start`
+  // supersedes this — it's deleted then. Refused in packaged builds.
+  ipcMain.handle("bootstrap:install-sidecar-venv", async () => {
+    if (app.isPackaged) {
+      throw new Error("bootstrap:install-sidecar-venv is dev-only");
+    }
+    const sourceDir = getResourceDir("sidecar");
+    logToFile(`bootstrap: install-sidecar-venv ← ${sourceDir}\n`);
+    await createSidecarVenv(sourceDir, (pct, phase, message) => {
+      const msg = message ? ` (${message})` : "";
+      logToFile(`bootstrap: sidecar-venv ${phase} ${pct}%${msg}\n`);
+    });
+    bootstrappedCache = null;
+    return { ok: true, sourceDir };
   });
 
   ipcMain.handle(

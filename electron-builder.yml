@@ -14,16 +14,46 @@ files:
   - "!**/{tsconfig*,*.config.*,.eslintrc*}"
 
 extraResources:
+  # ── Sidecar source tree (Pinokio bootstrap) ────────────────────────────────
+  # The bootstrap flow (desktop-shell/bootstrap/sidecar_venv.ts) runs
+  # `pip install <process.resourcesPath>/sidecar` from this tree into the
+  # per-app venv at <userData>/bin/sidecar-venv. pyproject.toml's
+  # [project.scripts] generates Scripts/altosymbiosis-server.exe which
+  # desktop-shell/sidecar.ts spawns at runtime. Filter strips dev-only
+  # artifacts (caches, the legacy backend/.venv, the PyInstaller spec, the
+  # test suite, the auxiliary requirements files) so the shipped resource
+  # tree is just what `pip install` needs.
+  - from: backend
+    to: sidecar
+    filter:
+      - "**/*"
+      - "!**/__pycache__/**"
+      - "!.venv/**"
+      - "!dist/**"
+      - "!build/**"
+      - "!*.egg-info/**"
+      - "!tests/**"
+      - "!*.spec"
+      - "!pytest.ini"
+      - "!requirements-build.txt"
+      - "!requirements-dev.txt"
+      - "!requirements-bench.txt"
+
+  # ── Legacy PyInstaller bundle (REMOVED in commit 5) ────────────────────────
   # Mirrors branding/sidecar-bundle/** into resources/backend/. As of PR 17
   # this tree contains:
-  #   server.exe + onedir layout — the FastAPI sidecar
+  #   server.exe + onedir layout — the FastAPI sidecar (superseded by the
+  #                                Pinokio venv path above; sidecar.ts no
+  #                                longer reads from resources/backend/)
   #   llama-server/              — the bundled llama.cpp server (Phase 9)
   #   bundled_models.json        — HF catalog with pinned sha256 (Phase 9)
   #   whisper/                   — bundled Whisper.cpp CLI + DLLs (PR 17)
   #   piper/                     — bundled Piper TTS + DLLs (PR 17)
   #   voice_assets.json          — voice model catalog with pinned sha256 (PR 17)
-  # build-installer.bat regenerates the directory on every run, so
-  # electron-builder always picks up the latest contents.
+  # The engine binaries (llama-server, whisper, piper) still ship via this
+  # entry until the follow-up engine-download branch moves them to a runtime
+  # fetch into <userData>/bin/engines/. Commit 5 will drop the PyInstaller
+  # server.exe portion once the new pipeline is VM-verified end-to-end.
   - from: branding/sidecar-bundle
     to: backend
     filter: ["**/*"]

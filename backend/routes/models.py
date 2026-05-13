@@ -1,6 +1,6 @@
 """GET /api/models/catalog — the renderer's view of the Claude model lineup.
 
-Reads ``backend/config/models.json`` through ``core.model_catalog`` and
+Reads ``core/config/models.json`` through ``core.model_catalog`` and
 returns the typed list the Settings dropdown renders. The orchestrator's
 price math uses the same catalog, so the renderer can never offer a
 model whose cost the backend cannot compute.

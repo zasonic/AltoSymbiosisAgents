@@ -1,10 +1,14 @@
 // desktop-shell/sidecar.ts — manages the Python FastAPI sidecar process.
 //
 // Responsibilities:
-//   1. Spawn the Python sidecar (dev: backend/.venv/Scripts/python.exe →
-//      system python; prod: <process.resourcesPath>/backend/server.exe —
-//      the "resources" segment is Electron's own packaged-app convention,
-//      unrelated to this repo's source layout)
+//   1. Spawn the Python sidecar. The preferred path on Windows is the
+//      bootstrap-generated console-script shim at
+//      <userData>/bin/sidecar-venv/Scripts/altosymbiosis-server.exe — pip
+//      generates that from backend/pyproject.toml's
+//      `[project.scripts] altosymbiosis-server = "server:main"`. If the
+//      shim isn't on disk (non-Windows, or a not-yet-bootstrapped install)
+//      we fall back to the legacy backend/.venv → system-python path so
+//      dev on macOS / Linux keeps working until those installers land.
 //   2. Pass `--token <uuid>` and `--user-data <path>` so the sidecar binds
 //      a free port, prints PORT=<n>, then prints READY when serving.
 //   3. Read stdout line-by-line until PORT= appears (15s timeout), then
@@ -23,6 +27,11 @@ import { randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, statSync, renameSync, WriteStream } from "node:fs";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
+
+import { getResourceDir, getSidecarEntryPoint } from "./bootstrap/bin_manager";
+import type { SidecarInfo, SidecarStatus } from "./sidecar-types";
+
+export type { SidecarInfo, SidecarStatus } from "./sidecar-types";
 
 const HEALTH_POLL_INTERVAL_MS = 500;
 const HEALTH_POLL_MAX_RETRIES = 30;          // 30 * 500ms = 15s
@@ -53,16 +62,9 @@ function redactArgs(args: readonly string[]): string[] {
   });
 }
 
-export type SidecarStatus =
-  | { status: "starting" }
-  | { status: "ready"; port: number; token: string }
-  | { status: "crashed"; code: number | null; signal: NodeJS.Signals | null; error?: string }
-  | { status: "stopped" };
-
-export interface SidecarInfo {
-  port: number;
-  token: string;
-}
+// SidecarStatus and SidecarInfo are declared in ./sidecar-types and re-
+// exported via the top-of-file `export type { ... }` so the renderer's
+// tsconfig.web.json can resolve them without pulling this file in.
 
 export class SidecarManager extends EventEmitter {
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -238,18 +240,22 @@ export class SidecarManager extends EventEmitter {
 
   private resolveSpawnArgs(): { command: string; args: string[] } {
     const args = ["--token", this.token, "--user-data", this.userDataDir];
-    if (app.isPackaged) {
-      // <process.resourcesPath>/backend/server.exe (PyInstaller onedir).
-      // process.resourcesPath is Electron's runtime path inside the packaged
-      // app — distinct from the repo's source `branding/` folder.
-      const exe =
-        process.platform === "win32"
-          ? "server.exe"
-          : "server";
-      const command = join(process.resourcesPath, "backend", exe);
-      return { command, args };
+
+    // Preferred path: the bootstrap-generated console script. Pip emits
+    // Scripts/altosymbiosis-server.exe from [project.scripts] in
+    // backend/pyproject.toml; that's the same .exe the smoke test in
+    // bin_manager.ts:runSidecarSmokeTest spawns, so a successful
+    // isBootstrapped() implies this path is live. NO `-m` form — keep one
+    // source of truth for the invocation contract.
+    if (process.platform === "win32" && existsSync(getSidecarEntryPoint())) {
+      return { command: getSidecarEntryPoint(), args };
     }
-    // Dev: prefer the project venv, fall back to system python.
+
+    // Legacy fallback. Non-Windows dev still uses backend/.venv; on Windows
+    // this only fires when the bootstrap hasn't run yet (e.g., very first
+    // launch before main.ts's isBootstrapped gate flips). The path stays
+    // for one release so mac/linux devs aren't broken until those installers
+    // land in a future branch.
     const venvPython =
       process.platform === "win32"
         ? join(this.projectRoot, "backend", ".venv", "Scripts", "python.exe")
@@ -259,10 +265,13 @@ export class SidecarManager extends EventEmitter {
   }
 
   private sidecarCwd(): string {
-    if (app.isPackaged) {
-      return join(process.resourcesPath, "backend");
-    }
-    return join(this.projectRoot, "backend");
+    // The bootstrap-generated entry point doesn't care about cwd (server.py
+    // resolves `_HERE` from `__file__`), but the legacy fallback runs
+    // `python server.py` so cwd must point at the directory holding
+    // server.py. getResourceDir("sidecar") collapses both modes:
+    //   * packaged → <process.resourcesPath>/sidecar
+    //   * dev      → <projectRoot>/backend
+    return getResourceDir("sidecar");
   }
 
   private handleStdout(chunk: string): void {

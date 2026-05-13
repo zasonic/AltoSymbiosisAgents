@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { SidecarStatus } from "../desktop-shell/sidecar";
+import type { SidecarStatus } from "../desktop-shell/sidecar-types";
 
 export interface SidecarInfo {
   port: number;
@@ -29,6 +29,8 @@ export interface ElectronAPI {
   getPlatform: () => Promise<NodeJS.Platform>;
   /** Dev-only; removed in commit 4 when `bootstrap:start` lands. */
   installMiniconda: () => Promise<{ ok: true; target: string }>;
+  /** Dev-only; removed in commit 4 when `bootstrap:start` lands. */
+  installSidecarVenv: () => Promise<{ ok: true; sourceDir: string }>;
   onSidecarStatus: (handler: (status: SidecarStatus) => void) => () => void;
   onUpdateAvailable: (
     handler: (info: { version: string; notesUrl?: string }) => void,
