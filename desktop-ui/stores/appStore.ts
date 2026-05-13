@@ -109,6 +109,12 @@ export interface AppState {
   activeView: ActiveView;
   studioMode: boolean;
   hasCompletedFirstRun: boolean;
+  // True iff <userData>/bin/miniconda + sidecar-venv exist and the sidecar
+  // smoke test passed. The BootstrapWizard overlay flips this to true after
+  // a successful install; the main process is the source of truth, but the
+  // renderer caches the last-seen value here so the wizard doesn't flash on
+  // restart once a venv is in place.
+  bootstrapped: boolean;
 
   // Runtime (not persisted)
   sidecarStatus: SidecarStatus | null;
@@ -172,6 +178,7 @@ export interface AppState {
   setActiveView: (v: ActiveView) => void;
   setStudioMode: (on: boolean) => void;
   setHasCompletedFirstRun: (done: boolean) => void;
+  setBootstrapped: (b: boolean) => void;
   setSidecarStatus: (s: SidecarStatus) => void;
   setServiceStatus: (s: Record<string, { ok: boolean; error?: string | null }>) => void;
   pushToast: (msg: Omit<ToastMessage, "id">) => void;
@@ -229,6 +236,7 @@ export const useAppStore = create<AppState>()(
       activeView: "chat",
       studioMode: false,
       hasCompletedFirstRun: false,
+      bootstrapped: false,
 
       sidecarStatus: null,
       toasts: [],
@@ -269,6 +277,7 @@ export const useAppStore = create<AppState>()(
       setActiveView: (v) => set({ activeView: v }),
       setStudioMode: (on) => set({ studioMode: on }),
       setHasCompletedFirstRun: (done) => set({ hasCompletedFirstRun: done }),
+      setBootstrapped: (b) => set({ bootstrapped: b }),
       setSidecarStatus: (s) => set({ sidecarStatus: s }),
       setServiceStatus: (s) => set({ serviceStatus: s }),
       pushToast: (msg) => {
@@ -437,6 +446,7 @@ export const useAppStore = create<AppState>()(
         activeView: state.activeView,
         studioMode: state.studioMode,
         hasCompletedFirstRun: state.hasCompletedFirstRun,
+        bootstrapped: state.bootstrapped,
       }),
     },
   ),

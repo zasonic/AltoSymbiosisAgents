@@ -56,6 +56,28 @@ export interface ElectronAPI {
   /** Path of the Electron userData dir (where logs/db/settings live). */
   getUserDataPath: () => Promise<string>;
 
+  /**
+   * Cached bootstrap readiness — true iff the Miniconda + sidecar-venv
+   * tree exists at <userData>/bin and the sidecar smoke test passed. The
+   * renderer reads this on first paint to decide between BootstrapWizard
+   * (false) and the main UI (true). The value is computed once in
+   * app.whenReady and cached for the session.
+   */
+  isBootstrapped: () => Promise<boolean>;
+  /**
+   * Force a fresh check of the bootstrap state. Used by BootstrapWizard
+   * after a successful install (commit 4) and on remount to recover from
+   * a stale cached `false`.
+   */
+  recheckBootstrap: () => Promise<boolean>;
+  /**
+   * NodeJS.Platform ("win32" | "darwin" | "linux" | ...) from the main
+   * process. BootstrapWizard branches its copy on this so non-Windows dev
+   * users see the "macOS / Linux coming later" message instead of a
+   * Windows-only install flow.
+   */
+  getPlatform: () => Promise<NodeJS.Platform>;
+
   /** Subscribe to sidecar lifecycle changes; returns an unsubscribe fn. */
   onSidecarStatus: (handler: (status: SidecarStatus) => void) => () => void;
   /**
@@ -89,6 +111,10 @@ const api: ElectronAPI = {
 
   getAppVersion: () => ipcRenderer.invoke("app:version"),
   getUserDataPath: () => ipcRenderer.invoke("app:user-data-path"),
+
+  isBootstrapped: () => ipcRenderer.invoke("app:is-bootstrapped"),
+  recheckBootstrap: () => ipcRenderer.invoke("app:recheck-bootstrap"),
+  getPlatform: () => ipcRenderer.invoke("app:platform"),
 
   onSidecarStatus: (handler) => {
     const wrapped = (_e: Electron.IpcRendererEvent, status: SidecarStatus) => handler(status);

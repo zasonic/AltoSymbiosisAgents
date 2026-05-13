@@ -24,6 +24,9 @@ export interface ElectronAPI {
   openExternal: (url: string) => Promise<void>;
   getAppVersion: () => Promise<string>;
   getUserDataPath: () => Promise<string>;
+  isBootstrapped: () => Promise<boolean>;
+  recheckBootstrap: () => Promise<boolean>;
+  getPlatform: () => Promise<NodeJS.Platform>;
   onSidecarStatus: (handler: (status: SidecarStatus) => void) => () => void;
   onUpdateAvailable: (
     handler: (info: { version: string; notesUrl?: string }) => void,

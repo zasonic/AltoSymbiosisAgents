@@ -15,6 +15,7 @@ import { writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isBootstrapped } from "./bootstrap/bin_manager";
 import { SidecarManager } from "./sidecar";
 
 // Only meaningful in development — `resolveSpawnArgs` consults this to find
@@ -29,6 +30,11 @@ let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarManager | null = null;
 let mainLogStream: WriteStream | null = null;
 let updaterTimer: NodeJS.Timeout | null = null;
+// Cached result of bootstrap/bin_manager.isBootstrapped(), populated once in
+// whenReady() and refreshed via the app:recheck-bootstrap IPC handler. The
+// BootstrapWizard relies on this to drive its overlay; sidecar boot is gated
+// on it too (we don't start the FastAPI server until the venv is in place).
+let bootstrappedCache: boolean | null = null;
 
 const MAIN_LOG_MAX_BYTES = 10 * 1024 * 1024; // 10MB
 
@@ -320,6 +326,18 @@ function wireIpc(): void {
   ipcMain.handle("app:version", () => app.getVersion());
   ipcMain.handle("app:user-data-path", () => app.getPath("userData"));
 
+  ipcMain.handle("app:is-bootstrapped", async () => {
+    if (bootstrappedCache == null) {
+      bootstrappedCache = await isBootstrapped();
+    }
+    return bootstrappedCache;
+  });
+  ipcMain.handle("app:recheck-bootstrap", async () => {
+    bootstrappedCache = await isBootstrapped();
+    return bootstrappedCache;
+  });
+  ipcMain.handle("app:platform", () => process.platform);
+
   ipcMain.handle(
     "update:install-now",
     rateLimit("update:install-now", 1, async () => {
@@ -522,9 +540,20 @@ app.whenReady().then(async () => {
   const userDataDir = app.getPath("userData");
   bootMainLog(userDataDir);
 
+  // Compute bootstrap readiness BEFORE opening the window so the renderer's
+  // first paint can already gate on the cached boolean — avoids a flash of
+  // the chat UI behind the BootstrapWizard overlay.
+  bootstrappedCache = await isBootstrapped();
+  logToFile(`bootstrap: isBootstrapped() = ${bootstrappedCache}\n`);
+
   wireIpc();
   await createWindow();
-  await bootSidecar(userDataDir);
+  // The sidecar only boots when the venv is in place. On a fresh install the
+  // BootstrapWizard takes over, runs the install flow, and calls bootSidecar
+  // itself once the venv is ready (commit 4 wires that path).
+  if (bootstrappedCache) {
+    await bootSidecar(userDataDir);
+  }
   await wireAutoUpdater();
 
   app.on("activate", () => {
