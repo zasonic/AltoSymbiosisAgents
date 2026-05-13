@@ -23,6 +23,7 @@ on:
       - "backend/**"
       - "build-scripts/build-sidecar.*"
       - "branding/**"
+      - "dev/install.ps1"
       - "electron-builder.yml"
       - "package.json"
       - "package-lock.json"
@@ -34,6 +35,7 @@ on:
       - "backend/**"
       - "build-scripts/build-sidecar.*"
       - "branding/**"
+      - "dev/install.ps1"
       - "electron-builder.yml"
       - "package.json"
       - "package-lock.json"
@@ -51,6 +53,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify install.ps1 stays ASCII-only (PS 5.1 compatibility)
+        # Windows PowerShell 5.1 reads BOM-less .ps1 files as Windows-1252,
+        # which mangles UTF-8 multi-byte chars and silently corrupts strings.
+        # Keep install.ps1 ASCII so first-run on a clean Windows box can't
+        # regress into the "CommandNotFoundException: 'this'" failure mode.
+        shell: pwsh
+        run: |
+          $hit = Select-String -Path dev/install.ps1 -Pattern '[^\x00-\x7F]'
+          if ($hit) {
+            $hit | ForEach-Object { Write-Host $_.Line }
+            throw "dev/install.ps1 contains non-ASCII characters; will break Windows PowerShell 5.1."
+          }
 
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
