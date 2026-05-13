@@ -77,6 +77,16 @@ export interface ElectronAPI {
    * Windows-only install flow.
    */
   getPlatform: () => Promise<NodeJS.Platform>;
+  /**
+   * DEV-ONLY: trigger the Miniconda download + silent install into
+   * <userData>/bin/miniconda. Refused by main when app.isPackaged === true.
+   * Removed in commit 4 when the full `bootstrap:start` flow lands. Until
+   * then, call from the dev console as:
+   *   await window.electronAPI.installMiniconda()
+   * Progress prints to {userData}/main.log; check `bin/miniconda/python.exe
+   * --version` afterwards.
+   */
+  installMiniconda: () => Promise<{ ok: true; target: string }>;
 
   /** Subscribe to sidecar lifecycle changes; returns an unsubscribe fn. */
   onSidecarStatus: (handler: (status: SidecarStatus) => void) => () => void;
@@ -115,6 +125,7 @@ const api: ElectronAPI = {
   isBootstrapped: () => ipcRenderer.invoke("app:is-bootstrapped"),
   recheckBootstrap: () => ipcRenderer.invoke("app:recheck-bootstrap"),
   getPlatform: () => ipcRenderer.invoke("app:platform"),
+  installMiniconda: () => ipcRenderer.invoke("bootstrap:install-miniconda"),
 
   onSidecarStatus: (handler) => {
     const wrapped = (_e: Electron.IpcRendererEvent, status: SidecarStatus) => handler(status);

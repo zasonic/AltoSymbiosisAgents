@@ -15,7 +15,8 @@ import { writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { isBootstrapped } from "./bootstrap/bin_manager";
+import { getBinRoot, isBootstrapped } from "./bootstrap/bin_manager";
+import { downloadAndInstallMiniconda } from "./bootstrap/miniconda";
 import { SidecarManager } from "./sidecar";
 
 // Only meaningful in development — `resolveSpawnArgs` consults this to find
@@ -337,6 +338,25 @@ function wireIpc(): void {
     return bootstrappedCache;
   });
   ipcMain.handle("app:platform", () => process.platform);
+
+  // Dev-only Miniconda installer hook for commit-2 manual verification.
+  // Commit 4's `bootstrap:start` supersedes this — it's deleted then. Refuses
+  // in packaged builds so a curious renderer in production can't trigger a
+  // 600 MB download.
+  ipcMain.handle("bootstrap:install-miniconda", async () => {
+    if (app.isPackaged) {
+      throw new Error("bootstrap:install-miniconda is dev-only");
+    }
+    const target = join(getBinRoot(), "miniconda");
+    logToFile(`bootstrap: install-miniconda → ${target}\n`);
+    await downloadAndInstallMiniconda(target, (pct, phase) => {
+      logToFile(`bootstrap: miniconda ${phase} ${pct}%\n`);
+    });
+    // Invalidate the cached `isBootstrapped` result so the next renderer call
+    // re-runs the smoke test against the freshly-installed Miniconda.
+    bootstrappedCache = null;
+    return { ok: true, target };
+  });
 
   ipcMain.handle(
     "update:install-now",

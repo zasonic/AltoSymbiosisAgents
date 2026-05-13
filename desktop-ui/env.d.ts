@@ -27,6 +27,8 @@ export interface ElectronAPI {
   isBootstrapped: () => Promise<boolean>;
   recheckBootstrap: () => Promise<boolean>;
   getPlatform: () => Promise<NodeJS.Platform>;
+  /** Dev-only; removed in commit 4 when `bootstrap:start` lands. */
+  installMiniconda: () => Promise<{ ok: true; target: string }>;
   onSidecarStatus: (handler: (status: SidecarStatus) => void) => () => void;
   onUpdateAvailable: (
     handler: (info: { version: string; notesUrl?: string }) => void,
