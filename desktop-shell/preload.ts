@@ -6,7 +6,18 @@
 
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { SidecarStatus } from "./sidecar";
+import type { SidecarStatus } from "./sidecar-types";
+
+/**
+ * Payload of the `bootstrap:progress` event. Carries either a progress tick
+ * (pct + optional phase/message) or an error sentinel that the wizard
+ * renders as the labeled error card with Retry / Reset bin / Open log
+ * folder actions. Mirrored in desktop-ui/env.d.ts so the renderer's
+ * tsconfig.web.json doesn't import this file.
+ */
+export type BootstrapProgressEvent =
+  | { step: number; pct: number; phase?: string; message?: string; error?: undefined }
+  | { step: number; pct?: undefined; error: { label: string; cause: string; logPath: string } };
 
 export interface SidecarInfo {
   port: number;
@@ -56,6 +67,58 @@ export interface ElectronAPI {
   /** Path of the Electron userData dir (where logs/db/settings live). */
   getUserDataPath: () => Promise<string>;
 
+  /**
+   * Cached bootstrap readiness — true iff the Miniconda + sidecar-venv
+   * tree exists at <userData>/bin and the sidecar smoke test passed. The
+   * renderer reads this on first paint to decide between BootstrapWizard
+   * (false) and the main UI (true). The value is computed once in
+   * app.whenReady and cached for the session.
+   */
+  isBootstrapped: () => Promise<boolean>;
+  /**
+   * Force a fresh check of the bootstrap state. Used by BootstrapWizard
+   * after a successful install (commit 4) and on remount to recover from
+   * a stale cached `false`.
+   */
+  recheckBootstrap: () => Promise<boolean>;
+  /**
+   * NodeJS.Platform ("win32" | "darwin" | "linux" | ...) from the main
+   * process. BootstrapWizard branches its copy on this so non-Windows dev
+   * users see the "macOS / Linux coming later" message instead of a
+   * Windows-only install flow.
+   */
+  getPlatform: () => Promise<NodeJS.Platform>;
+  /**
+   * Drive the end-to-end bootstrap install (Miniconda → sidecar venv → boot
+   * sidecar). Phases that have already completed are skipped on Retry so a
+   * sidecar-boot failure doesn't trigger a fresh 600 MB download. Progress
+   * streams via `onBootstrapProgress`; success ends with an
+   * `onBootstrapDone` event. Resolves to `{ ok: true }` on success or
+   * `{ ok: false, error }` if any step labeled-errored.
+   */
+  startBootstrap: () => Promise<
+    | { ok: true }
+    | { ok: false; error: { label: string; cause: string } }
+  >;
+  /**
+   * Subscribe to per-phase progress events while a bootstrap:start is in
+   * flight. Payload is either a progress update or an error sentinel; the
+   * wizard branches on `error` presence. Returns an unsubscribe fn.
+   */
+  onBootstrapProgress: (
+    handler: (event: BootstrapProgressEvent) => void,
+  ) => () => void;
+  /** Fires once when bootstrap:start has reached a healthy sidecar. */
+  onBootstrapDone: (handler: () => void) => () => void;
+  /**
+   * Recursively delete <userData>/bin so a half-installed tree can be wiped.
+   * Tears down the running sidecar first (Windows file-locks the entry
+   * point .exe). Recoverable user action from the wizard error card.
+   */
+  resetBin: () => Promise<{ ok: true; removed: string }>;
+  /** Open the userData dir in the OS file explorer (Finder / Explorer). */
+  openBootstrapLogs: () => Promise<{ ok: true; path: string }>;
+
   /** Subscribe to sidecar lifecycle changes; returns an unsubscribe fn. */
   onSidecarStatus: (handler: (status: SidecarStatus) => void) => () => void;
   /**
@@ -89,6 +152,24 @@ const api: ElectronAPI = {
 
   getAppVersion: () => ipcRenderer.invoke("app:version"),
   getUserDataPath: () => ipcRenderer.invoke("app:user-data-path"),
+
+  isBootstrapped: () => ipcRenderer.invoke("app:is-bootstrapped"),
+  recheckBootstrap: () => ipcRenderer.invoke("app:recheck-bootstrap"),
+  getPlatform: () => ipcRenderer.invoke("app:platform"),
+  startBootstrap: () => ipcRenderer.invoke("bootstrap:start"),
+  onBootstrapProgress: (handler) => {
+    const wrapped = (_e: Electron.IpcRendererEvent, event: BootstrapProgressEvent) =>
+      handler(event);
+    ipcRenderer.on("bootstrap:progress", wrapped);
+    return () => ipcRenderer.removeListener("bootstrap:progress", wrapped);
+  },
+  onBootstrapDone: (handler) => {
+    const wrapped = () => handler();
+    ipcRenderer.on("bootstrap:done", wrapped);
+    return () => ipcRenderer.removeListener("bootstrap:done", wrapped);
+  },
+  resetBin: () => ipcRenderer.invoke("bootstrap:reset-bin"),
+  openBootstrapLogs: () => ipcRenderer.invoke("bootstrap:open-logs"),
 
   onSidecarStatus: (handler) => {
     const wrapped = (_e: Electron.IpcRendererEvent, status: SidecarStatus) => handler(status);

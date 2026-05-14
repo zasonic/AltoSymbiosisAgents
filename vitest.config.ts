@@ -8,7 +8,10 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["desktop-ui/**/*.test.{ts,tsx}"],
+    // Both the renderer (jsdom) and main-process (node) suites run from one
+    // vitest config. Main-process tests opt out of jsdom with a
+    // `// @vitest-environment node` pragma at the top of the test file.
+    include: ["desktop-ui/**/*.test.{ts,tsx}", "desktop-shell/**/*.test.ts"],
     environment: "jsdom",
     globals: false,
   },

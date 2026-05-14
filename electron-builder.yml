@@ -14,21 +14,46 @@ files:
   - "!**/{tsconfig*,*.config.*,.eslintrc*}"
 
 extraResources:
-  # Mirrors branding/sidecar-bundle/** into resources/backend/. As of PR 17
-  # this tree contains:
-  #   server.exe + onedir layout — the FastAPI sidecar
-  #   llama-server/              — the bundled llama.cpp server (Phase 9)
-  #   bundled_models.json        — HF catalog with pinned sha256 (Phase 9)
-  #   whisper/                   — bundled Whisper.cpp CLI + DLLs (PR 17)
-  #   piper/                     — bundled Piper TTS + DLLs (PR 17)
-  #   voice_assets.json          — voice model catalog with pinned sha256 (PR 17)
-  # build-installer.bat regenerates the directory on every run, so
-  # electron-builder always picks up the latest contents.
-  - from: branding/sidecar-bundle
-    to: backend
-    filter: ["**/*"]
+  # ── Sidecar source tree (Pinokio bootstrap) ────────────────────────────────
+  # The bootstrap flow (desktop-shell/bootstrap/sidecar_venv.ts) runs
+  # `pip install <process.resourcesPath>/sidecar` from this tree into the
+  # per-app venv at <userData>/bin/sidecar-venv. pyproject.toml's
+  # [project.scripts] generates Scripts/altosymbiosis-server.exe which
+  # desktop-shell/sidecar.ts spawns at runtime. Filter strips dev-only
+  # artifacts (caches, the legacy backend/.venv, build outputs, the test
+  # suite, the auxiliary requirements files) so the shipped resource tree
+  # is just what `pip install` needs.
+  - from: backend
+    to: sidecar
+    filter:
+      - "**/*"
+      - "!**/__pycache__/**"
+      - "!.venv/**"
+      - "!dist/**"
+      - "!build/**"
+      - "!*.egg-info/**"
+      - "!tests/**"
+      - "!*.spec"
+      - "!pytest.ini"
+      - "!requirements-dev.txt"
+      - "!requirements-bench.txt"
+
+  # ── App icon ───────────────────────────────────────────────────────────────
   - from: branding/icon.png
     to: icon.png
+
+  # NOTE: the legacy `branding/sidecar-bundle → backend` entry was removed in
+  # commit 5 of claude/pinokio-pipeline. It previously co-mingled two unrelated
+  # payloads:
+  #
+  #   * PyInstaller's server.exe + onedir layout (the FastAPI sidecar)
+  #     — superseded by the venv-based path above.
+  #   * Engine binaries (llama-server, whisper.cpp, piper) + their catalog
+  #     JSON — the engine portion stays bundled in the project, but moves
+  #     to a runtime download in the follow-up engine-download branch
+  #     (tracked at the "engine variant download wizard" issue). End users
+  #     on v1.0.0-test.2 are Claude-API-only; the engine wizard re-introduces
+  #     local engines via a UI-driven fetch into <userData>/bin/engines/.
 
 win:
   target:

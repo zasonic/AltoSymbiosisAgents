@@ -41,30 +41,53 @@ Local models fail to respond when:
 If a local response comes back empty or scores low, the orchestrator
 auto-escalates that single turn to Claude.
 
-## "backend\\.venv is missing"
+## Bootstrap wizard stuck or shows an error card
 
-`Start.bat`'s install step didn't finish. Re-run `Start.bat`; the
-script is safe to run multiple times.
+First-launch downloads Miniconda + creates a Python venv under
+`%APPDATA%\altosybioagents\bin\`. The wizard shows three steps:
+"Downloading Python", "Setting up environment", "Almost done". On any
+labeled error, the wizard surfaces a Retry / Reset bin / Open log
+folder card.
 
-## Sidecar fails to start
+- **DownloadError / ChecksumMismatch** — your network couldn't reach
+  `repo.anaconda.com` or the partial download corrupted. Click Retry.
+  If it persists, click Reset bin (wipes
+  `%APPDATA%\altosybioagents\bin\`) and try again.
+- **InstallerExitNonZero** — Miniconda's silent installer failed.
+  Antivirus is the usual cause; whitelist the bin folder or move the
+  app to a folder your AV doesn't watch.
+- **VenvCreateError / PipInstallError** — Miniconda installed but
+  `python -m venv` or `pip install` failed. Check the bootstrap log
+  via Open log folder; the cause is usually a corrupted Miniconda
+  install. Click Reset bin.
+- **SidecarBootError** — venv built, sidecar tried to start, and the
+  FastAPI server crashed before `/health` came up. Open log folder
+  points at `sidecar.log` for this case; read the last 50 lines.
+  Common causes: port already in use, sqlite-vec wheel mismatch,
+  missing Visual C++ redistributable.
+
+## Sidecar fails to start (after bootstrap)
 
 Open `%APPDATA%\altosybioagents\sidecar.log` and read the last 50 lines.
 Common causes:
 - Port in use by another process.
-- Antivirus blocking the PyInstaller-bundled `server.exe`.
-- Missing Visual C++ redistributable.
+- Visual C++ redistributable missing (some Python wheels need it).
+- The `bin\sidecar-venv\Scripts\altosymbiosis-server.exe` shim is
+  missing or corrupted — wipe the bin folder via the BootstrapWizard's
+  Reset bin action and let the wizard re-install.
 
 ## `npm run dev` exits immediately
 
-`node_modules/` is incomplete. Delete it and re-run `Start.bat` (or
-`npm install` directly).
+`node_modules/` is incomplete. Delete it and re-run `dev\dev.bat` (or
+`npm install && npm run dev` directly). Python is no longer required
+to run `npm run dev`.
 
 ## App opens to a blank window
 
-Likely a renderer build error. Check the terminal where `Start.bat` is
-running for stack traces. The Electron main process and sidecar
-restart automatically when their source files change; the renderer
-hot-reloads on save.
+Likely a renderer build error. Check the terminal where `dev\dev.bat`
+or `npm run dev` is running for stack traces. The Electron main process
+and sidecar restart automatically when their source files change; the
+renderer hot-reloads on save.
 
 ## Diagnostics export
 

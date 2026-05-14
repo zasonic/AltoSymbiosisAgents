@@ -8,7 +8,7 @@ Before this module landed, the model list was duplicated in three places:
 user typed the id by hand). Bug 12 — the savings calculation hardcoding
 the Sonnet price — was one symptom of that drift.
 
-The catalog is loaded from ``backend/config/models.json`` and cached
+The catalog is loaded from ``core/config/models.json`` and cached
 in-process. ``prices_for_model()`` is the single price lookup used by
 the orchestrator; it prefers an exact id match and falls back to the
 deterministic family substring search (Bug 12 fix) when the id is not
@@ -27,10 +27,13 @@ from typing import Optional
 
 log = logging.getLogger("altosybioagents.model_catalog")
 
-# Path resolution: ``backend/config/models.json`` relative to this file,
-# regardless of where the sidecar was launched from. Tests can override the
-# path via ``set_catalog_path_for_testing()``.
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "config" / "models.json"
+# Path resolution: ``core/config/models.json`` (package_data inside the
+# ``core`` package), regardless of where the sidecar was launched from.
+# Moved here from backend/config/ as part of the Pinokio bootstrap pivot so
+# non-editable wheel installs include the JSON alongside the .py modules
+# (verified by commit 3 preflight). Tests can override the path via
+# ``set_catalog_path_for_testing()``.
+_DEFAULT_PATH = Path(__file__).resolve().parent / "config" / "models.json"
 
 _lock = threading.Lock()
 _cached: "Optional[Catalog]" = None

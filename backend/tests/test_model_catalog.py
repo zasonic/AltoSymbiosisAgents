@@ -78,7 +78,7 @@ def test_settings_default_matches_catalog_default():
     _, default = SETTINGS_DEFAULTS["claude_model"]
     assert _shipped_catalog().find_by_id(default) is not None, (
         f"SETTINGS_DEFAULTS['claude_model'] = {default!r} is not in "
-        f"backend/config/models.json. Either update the default or add "
+        f"core/config/models.json. Either update the default or add "
         f"the entry to the catalog."
     )
 

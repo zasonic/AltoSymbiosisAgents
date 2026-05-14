@@ -114,7 +114,7 @@ def _estimate_cost(model: str, tokens_in: int, tokens_out: int,
 
     Delegates to ``core.model_catalog`` so the catalog file is the
     single source of truth — adding a model requires editing
-    ``backend/config/models.json`` and nothing else. Users can still
+    ``core/config/models.json`` and nothing else. Users can still
     override prices via the ``model_prices`` setting; ModelCatalog
     threads that dict through before falling back to catalog defaults.
     """
@@ -637,17 +637,18 @@ class ChatOrchestrator:
 
     @staticmethod
     def _load_prompt_template(name: str, fallback: str) -> str:
-        """Load a prompt template from backend/templates/.
+        """Load a prompt template from core/templates/.
 
-        Falls back to the inline string when the file is missing (which can
-        happen if the PyInstaller bundle drops the templates directory or in
-        unusual test layouts). The fallback keeps the architectural wall —
-        same intent, just terser.
+        Falls back to the inline string when the file is missing (rare —
+        usually a test running outside the installed package). Templates
+        moved into the ``core`` package as part of the Pinokio bootstrap
+        pivot so they ride along as package_data in non-editable wheel
+        installs (verified by commit 3 preflight).
         """
         try:
             from pathlib import Path
             here = Path(__file__).resolve().parent.parent
-            text = (here / "templates" / name).read_text(encoding="utf-8")
+            text = (here / "core" / "templates" / name).read_text(encoding="utf-8")
             if text.strip():
                 return text
         except Exception:

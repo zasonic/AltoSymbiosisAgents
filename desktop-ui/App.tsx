@@ -4,6 +4,7 @@ import { Escalation, Memory, Settings, System, resetSidecarInfo } from "@/api/cl
 import { subscribeEvents } from "@/api/sse";
 import { t } from "@/i18n";
 import { AgentPanel } from "@/components/AgentPanel";
+import { BootstrapWizard } from "@/components/BootstrapWizard";
 import { CanaryAlertModal } from "@/components/CanaryAlertModal";
 import { ChatView } from "@/components/ChatView";
 import { DiagnosticsPanel } from "@/components/DiagnosticsPanel";
@@ -45,6 +46,8 @@ export function App() {
   const toasts = useAppStore((s) => s.toasts);
   const hasCompletedFirstRun = useAppStore((s) => s.hasCompletedFirstRun);
   const setHasCompletedFirstRun = useAppStore((s) => s.setHasCompletedFirstRun);
+  const bootstrapped = useAppStore((s) => s.bootstrapped);
+  const setBootstrapped = useAppStore((s) => s.setBootstrapped);
   const pendingEscalations = useAppStore((s) => s.pendingEscalations);
   const setPendingEscalations = useAppStore((s) => s.setPendingEscalations);
   const addEscalation = useAppStore((s) => s.addEscalation);
@@ -57,6 +60,23 @@ export function App() {
   const setVotingActive = useAppStore((s) => s.setVotingActive);
   const patchBundledDownload = useAppStore((s) => s.patchBundledDownload);
   const patchVoiceAssets = useAppStore((s) => s.patchVoiceAssets);
+
+  // ── Bootstrap readiness sync ───────────────────────────────────────────
+  // Sync the renderer's persisted `bootstrapped` flag against the main
+  // process's truth. The persisted value lets us skip the wizard flash on a
+  // previously-bootstrapped install; this effect catches the case where the
+  // bin/ tree was deleted out from under us between sessions.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const ready = await window.electronAPI.isBootstrapped();
+      if (!alive) return;
+      setBootstrapped(ready);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [setBootstrapped]);
 
   // ── Sidecar status subscription ────────────────────────────────────────
   useEffect(() => {
@@ -407,6 +427,14 @@ export function App() {
     hasCompletedFirstRun && sidecarStatus?.status === "ready"
       ? pendingEscalations[0] ?? null
       : null;
+
+  // Gate the entire app shell on bootstrap readiness. BootstrapWizard owns
+  // the install flow (and the "macOS / Linux coming later" copy on non-
+  // Windows dev) until the bin/ tree is in place and the sidecar smoke test
+  // passes; only then do StatusBar / Sidebar / FirstRunWizard render.
+  if (!bootstrapped) {
+    return <BootstrapWizard />;
+  }
 
   return (
     <div className="flex flex-col h-screen">

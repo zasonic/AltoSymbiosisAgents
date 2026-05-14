@@ -1,46 +1,33 @@
 name: windows-smoke
 
-# Layer C4 boot-smoke: PR + main builds the PyInstaller sidecar bundle on
-# a Windows runner and verifies the resulting server.exe prints READY
-# on stdout. This catches packaging regressions (missing hidden imports,
-# wrong sqlite_vec wheel, broken keyring stub) before they reach users
-# instead of after a user posts a screenshot.
+# Layer C4 boot-smoke for the Pinokio bootstrap pipeline. On a Windows
+# runner, mimics what the BootstrapWizard does at first launch:
+#   1. Create a fresh venv with the runner's Python 3.12.
+#   2. `pip install --no-cache-dir backend` — non-editable, matches the
+#      packaged-mode codepath that bootstrap/sidecar_venv.ts runs.
+#   3. Spawn the generated `Scripts/altosymbiosis-server.exe` console
+#      script and wait for `PORT=<n>` / `READY` on stdout.
+# Catches packaging regressions (missing module in pyproject.toml, broken
+# keyring stub, sqlite-vec wheel mismatch) before they reach users instead
+# of after a user posts a screenshot.
 #
-# Scope:
-#   Builds the sidecar with PyInstaller, runs it, waits for READY.
-#   Does NOT exercise the Electron shell or the NSIS installer — those
-#   need a desktop session and elevated installs. The full "install →
-#   click → screenshot" Playwright smoke is still deferred (see
-#   Layer C2/C4 deferrals).
-#
-# Why path-scoped: a typo in a renderer .tsx doesn't risk the
-# PyInstaller bundle, so we skip the ~10-min Windows build in that case.
-# Anything that could change the sidecar bundle DOES trigger it.
+# Path-scoped: a typo in a renderer .tsx doesn't risk the sidecar bundle,
+# so we skip the build in that case.
 on:
   push:
     branches: [main]
     paths:
       - "backend/**"
-      - "build-scripts/build-sidecar.*"
-      - "branding/**"
-      - "dev/install.ps1"
       - "electron-builder.yml"
       - "package.json"
       - "package-lock.json"
-      - "pyinstaller.spec"
-      - "backend/pyinstaller.spec"
       - ".github/workflows/windows-smoke.yml"
   pull_request:
     paths:
       - "backend/**"
-      - "build-scripts/build-sidecar.*"
-      - "branding/**"
-      - "dev/install.ps1"
       - "electron-builder.yml"
       - "package.json"
       - "package-lock.json"
-      - "pyinstaller.spec"
-      - "backend/pyinstaller.spec"
       - ".github/workflows/windows-smoke.yml"
 
 permissions:
@@ -49,23 +36,10 @@ permissions:
 jobs:
   boot-smoke:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Verify install.ps1 stays ASCII-only (PS 5.1 compatibility)
-        # Windows PowerShell 5.1 reads BOM-less .ps1 files as Windows-1252,
-        # which mangles UTF-8 multi-byte chars and silently corrupts strings.
-        # Keep install.ps1 ASCII so first-run on a clean Windows box can't
-        # regress into the "CommandNotFoundException: 'this'" failure mode.
-        shell: pwsh
-        run: |
-          $hit = Select-String -Path dev/install.ps1 -Pattern '[^\x00-\x7F]'
-          if ($hit) {
-            $hit | ForEach-Object { Write-Host $_.Line }
-            throw "dev/install.ps1 contains non-ASCII characters; will break Windows PowerShell 5.1."
-          }
 
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
@@ -73,63 +47,53 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Setup Node 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Install Python dependencies
-        # PyInstaller bakes whatever's installed at build time into the
-        # exe, so requirements.txt is the production-shipped bundle.
-        # PyInstaller itself is pinned in backend/requirements-build.txt
-        # so local, smoke, and release all use the same version.
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
-          pip install -r backend/requirements-build.txt
-
-      - name: Install Node dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Build sidecar (PyInstaller)
-        # Runs build-scripts/build-sidecar.bat → produces
-        # backend/dist/server/server.exe and mirrors to
-        # branding/sidecar-bundle/. Failure here means PyInstaller
-        # could not assemble a working bundle — bad hidden import,
-        # missing wheel, etc.
-        run: npm run build:sidecar
-
-      - name: Verify server.exe was produced
+      - name: Create fresh venv and pip-install the sidecar package
+        # Mimics the packaged-mode codepath: non-editable install of
+        # backend/ into a fresh venv. The generated entry-point script
+        # lands at <venv>/Scripts/altosymbiosis-server.exe — that's what
+        # the production sidecar.ts spawns at runtime.
         shell: pwsh
         run: |
-          $exe = "backend\dist\server\server.exe"
-          if (-not (Test-Path $exe)) {
-            Write-Error "Sidecar build did not produce $exe"
-            exit 1
-          }
-          $size = (Get-Item $exe).Length
-          Write-Host "server.exe size: $size bytes"
-          if ($size -lt 1MB) {
-            Write-Error "server.exe is implausibly small ($size bytes) — bundle likely incomplete"
+          python -m venv .venv-smoke
+          .venv-smoke\Scripts\python -m pip install --upgrade pip
+          .venv-smoke\Scripts\pip install --no-cache-dir backend
+          if (-not (Test-Path ".venv-smoke\Scripts\altosymbiosis-server.exe")) {
+            Write-Error "pip install did not produce Scripts/altosymbiosis-server.exe — pyproject.toml [project.scripts] regression"
             exit 1
           }
 
-      - name: Run the sidecar and wait for READY
-        # The sidecar prints "READY" on stdout once uvicorn is serving
-        # (see backend/server.py:328). The smoke is: launch the bundled
-        # exe, capture stdout, fail if READY isn't seen within 90s.
-        # Matches the production spawn from desktop-shell/sidecar.ts:
-        # PYTHONUNBUFFERED=1 + PYTHONIOENCODING=utf-8 so a `console=False`
-        # GUI subsystem exe still flushes through inherited pipe handles.
-        # Kills the process afterwards so the runner isn't left waiting.
+      - name: Verify templates + config rode along into site-packages
+        # Commit-3 preflight confirmed that core/templates/ + core/config/
+        # must land alongside core/__init__.py for non-editable installs.
+        # Regression here would mean the package-data declaration in
+        # pyproject.toml was clobbered.
+        shell: pwsh
+        run: |
+          $sitePkgs = ".venv-smoke\Lib\site-packages"
+          $tpl = Join-Path $sitePkgs "core\templates\actor_system.txt"
+          $cfg = Join-Path $sitePkgs "core\config\models.json"
+          foreach ($p in @($tpl, $cfg)) {
+            if (-not (Test-Path $p)) {
+              Write-Error "Missing package data: $p"
+              exit 1
+            }
+            Write-Host "OK: $p"
+          }
+
+      - name: Spawn altosymbiosis-server and wait for READY
+        # backend/server.py prints `PORT=<n>` (line 296, flush=True) then
+        # `READY` (line 328, flush=True) once uvicorn is serving. Smoke
+        # is: launch the entry-point .exe, capture stdout, fail if READY
+        # doesn't appear within 90s. Mirrors the production spawn from
+        # desktop-shell/sidecar.ts with PYTHONUNBUFFERED=1 +
+        # PYTHONIOENCODING=utf-8 so inherited pipe handles flush.
         shell: pwsh
         timeout-minutes: 3
         env:
           PYTHONUNBUFFERED: "1"
           PYTHONIOENCODING: "utf-8"
         run: |
-          $exe = "backend\dist\server\server.exe"
+          $exe = ".venv-smoke\Scripts\altosymbiosis-server.exe"
           $logPath = "$env:RUNNER_TEMP\sidecar-stdout.log"
           $errPath = "$env:RUNNER_TEMP\sidecar-stderr.log"
           $userData = "$env:RUNNER_TEMP\smoke-userdata"
@@ -163,37 +127,20 @@ jobs:
             Start-Sleep -Milliseconds 500
           }
 
-          # Always print whatever the sidecar emitted so CI shows the
-          # failure mode (missing module, port conflict, etc.) inline.
           Write-Host "--- sidecar stdout ---"
           if (Test-Path $logPath) { Get-Content $logPath } else { Write-Host "(no stdout captured)" }
           Write-Host "--- sidecar stderr ---"
           if (Test-Path $errPath) { Get-Content $errPath } else { Write-Host "(no stderr captured)" }
 
-          # Also dump the sidecar's own log file if it created one — that
-          # contains uvicorn lines that may not have made it onto stdout
-          # under the GUI subsystem. paths.user_dir() uses platformdirs
-          # roaming=False which resolves to LOCALAPPDATA on Windows.
-          $sideLog = Join-Path $env:LOCALAPPDATA "altosybioagents\altosybioagents\app.log"
-          if (Test-Path $sideLog) {
-            Write-Host "--- sidecar app.log (LOCALAPPDATA) ---"
-            Get-Content $sideLog -Tail 100
-          } else {
-            Write-Host "(no app.log at $sideLog)"
-          }
-
-          # Kill the sidecar regardless of outcome (no-op if it exited early).
           if (-not $proc.HasExited) {
-            try {
-              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            } catch { }
+            try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch { }
           }
 
           if (-not $ready) {
             if ($exited) {
-              Write-Error "Sidecar exited (code $($proc.ExitCode)) before READY appeared — packaging regression."
+              Write-Error "Sidecar exited (code $($proc.ExitCode)) before READY appeared — pip-install regression."
             } else {
-              Write-Error "Sidecar did not print READY within 90s — packaging regression."
+              Write-Error "Sidecar did not print READY within 90s — pip-install regression."
             }
             exit 1
           }
