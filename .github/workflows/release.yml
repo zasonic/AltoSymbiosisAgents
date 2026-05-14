@@ -17,6 +17,10 @@ jobs:
         with:
           node-version: "20"
 
+      # Python is set up for the backend pytest gate only. The installer
+      # itself no longer needs Python at build time — bootstrap (Miniconda
+      # + sidecar venv) happens on first launch of the installed app, see
+      # desktop-shell/bootstrap/.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -24,23 +28,22 @@ jobs:
       - name: Install JS deps
         run: npm ci
 
-      - name: Create backend venv and install requirements
+      - name: Install sidecar package + dev test deps for pytest
         run: |
           cd backend
-          python -m venv .venv
-          .venv\Scripts\pip install -r requirements.txt
-          .venv\Scripts\pip install -r requirements-build.txt
+          pip install --no-cache-dir .
+          pip install --no-cache-dir -r requirements-dev.txt
 
       - name: Run backend tests
         run: |
           cd backend
-          .venv\Scripts\python -m pytest tests/ -q
+          python -m pytest tests/ -q
 
       - name: Run frontend tests
         run: npm run test:frontend
 
-      - name: Build sidecar and renderer
-        run: npm run build:sidecar && npm run build
+      - name: Build renderer + main + preload
+        run: npm run build
 
       - name: Publish Windows installer
         run: npx electron-builder --win --publish always

@@ -8,12 +8,22 @@ everything on your machine.
 
 Download the latest installer from
 [Releases](https://github.com/zasonic/altosybioagents/releases) and double-click.
-No setup required.
+No system Python or Node is required — on first launch the app downloads
+Miniconda and creates its own Python environment under `%APPDATA%`.
+
+**First launch requires internet** to download ~600 MB (Miniconda + Python
+dependencies). The download takes about 5 minutes on a typical connection.
+Subsequent launches work offline.
+
+**Windows x64 only** in this release. macOS and Linux installers are
+tracked for a future release. macOS / Linux developers can still run from
+source — see [Run](#run) below.
 
 You will need:
 - An [Anthropic API key](https://console.anthropic.com/settings/keys).
 - [Ollama](https://ollama.com/download) or [LM Studio](https://lmstudio.ai/)
   for local models (optional but recommended — keeps simple messages free).
+  Local engines bundled with the installer return in the next release.
 
 ## Trust
 
@@ -35,12 +45,17 @@ Open the app, paste your API key in Settings, and start chatting. Messages
 route automatically: simple turns go to a local model when one is available,
 complex turns go to Claude.
 
-For developers (Windows): double-click `Start.bat`. First run installs
-Node, Python, and dependencies; subsequent runs go straight to dev mode.
+For developers: install [Node 20+](https://nodejs.org/) and clone the repo.
+On Windows, double-click `dev\dev.bat`; on macOS / Linux, run
+`npm install && npm run dev`. Python is **not** required to run `npm run dev`
+— the bootstrap install (Miniconda + sidecar venv) happens inside the
+running Electron app the first time you launch it. To run the backend pytest
+suite directly, set up a Python 3.12 venv at `backend/.venv` and
+`pip install -r backend/requirements.txt`.
 
 ```
-Start.bat                    # install + dev (Windows)
-npm run dev                  # cross-platform dev (after manual setup)
+dev\dev.bat                  # install + dev (Windows)
+npm install && npm run dev   # install + dev (macOS / Linux, dev only)
 dev\build-installer.bat      # produce NSIS installer (Windows)
 ```
 
@@ -48,11 +63,14 @@ dev\build-installer.bat      # produce NSIS installer (Windows)
 
 - App data: `%APPDATA%/altosybioagents/` on Windows,
   `~/Library/Application Support/altosybioagents/` on macOS,
-  `~/.config/altosybioagents/` on Linux. Settings, SQLite database, and logs
+  `~/.config/altosybioagents/` on Linux. Settings, SQLite database, logs,
+  and the bundled Python environment (`bin/miniconda/`, `bin/sidecar-venv/`)
   all live there. The API key is in the OS keyring, not on disk.
 - Source layout: `desktop-ui/` (React renderer), `desktop-shell/` (Electron
-  main + preload), `backend/` (Python FastAPI sidecar), `branding/` (icon +
-  staged sidecar bundle), `dev/` (developer scripts).
+  main + preload, including `bootstrap/` for the first-launch installer),
+  `backend/` (Python FastAPI sidecar — pip-installable package), `branding/`
+  (icon), `dev/` (developer scripts), `legacy/` (kept-for-one-release
+  PyInstaller artifacts, deleted in v1.0.1).
 
 Deeper docs:
 - [docs/USER-GUIDE.md](docs/USER-GUIDE.md) — features and how to use them.

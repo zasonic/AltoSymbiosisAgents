@@ -1,4 +1,0 @@
-# Shared by dev/install.ps1, .github/workflows/release.yml, and
-# .github/workflows/windows-smoke.yml so the PyInstaller version cannot
-# drift between local, smoke, and release builds.
-pyinstaller==6.11.1

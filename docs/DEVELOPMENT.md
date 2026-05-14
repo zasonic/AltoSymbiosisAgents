@@ -4,32 +4,40 @@ Setup, daily workflow, and conventions.
 
 ## First-time setup (any OS)
 
-1. Install **Node 20+** and **Python 3.12+**.
+1. Install **Node 20+**.
 2. Install JS deps:
    ```
    npm install
    ```
-3. Create the Python venv and install backend deps:
-   ```
-   cd backend
-   python -m venv .venv
-   # Windows: .venv\Scripts\activate
-   # macOS/Linux: source .venv/bin/activate
-   pip install -r requirements.txt
-   cd ..
-   ```
 
-Windows users can run `Start.bat` instead — it does both of the above.
+That's all `npm run dev` needs. Python is **not** required to run the
+Electron app from source — the bootstrap install (Miniconda + sidecar
+venv) happens inside the running app the first time you launch it, see
+`desktop-shell/bootstrap/`.
+
+If you want to run the backend pytest suite directly (outside the
+electron-app bootstrap), set up a Python 3.12 venv yourself:
+```
+cd backend
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+cd ..
+```
+Windows devs can run `dev\dev.bat` instead of `npm install && npm run dev`.
 
 ## Layout
 
 ```
 desktop-ui/        React renderer (Vite, Tailwind)
 desktop-shell/     Electron main + preload + sidecar manager
-backend/           Python FastAPI sidecar (the brain)
-branding/          App icon + staged sidecar bundle
-build-scripts/     npm-script helpers
-dev/               Developer entry scripts (install.ps1, build-installer.bat)
+desktop-shell/bootstrap/  First-launch Miniconda + venv installer
+backend/           Python FastAPI sidecar (pip-installable package)
+branding/          App icon
+build-scripts/     npm-script helpers (benchmarks + codegen)
+dev/               Developer entry scripts (dev.bat, build-installer.bat)
+legacy/            Pre-Pinokio PyInstaller artifacts (deleted in v1.0.1)
 ```
 
 Entry points:
@@ -52,14 +60,15 @@ sidecar restart automatically when their source files change.
 ## Building
 
 ```
-npm run build:sidecar    # PyInstaller → branding/sidecar-bundle/
 npm run build            # electron-vite production build into out/
-npm run dist             # build:sidecar + build + electron-builder NSIS
+npm run dist             # build + electron-builder NSIS
 ```
 
-On Windows, `dev\build-installer.bat` chains all three and produces
-`dist/altosybioagents-Setup-<version>.exe`. Test the installer on a clean
-VM (no Python, no Node).
+On Windows, `dev\build-installer.bat` chains `npm install + npm run build
++ electron-builder --win` and produces `dist/altosybioagents-Setup-<version>.exe`.
+The installer no longer bundles Python — bootstrap (Miniconda + venv) runs
+on first launch of the INSTALLED app. Test on a clean VM (no Python, no
+Node) to confirm the end-to-end first-run flow.
 
 ## Reproducible builds
 
@@ -83,10 +92,13 @@ source state (file me one as a security concern).
 
 What's pinned to make this work:
 - JS deps in `package-lock.json` (the build uses `npm ci`).
-- Python deps in `backend/requirements.txt`.
-- PyInstaller in `backend/requirements-build.txt`.
-- llama.cpp / whisper.cpp / piper binaries in
-  `build-scripts/bundled_versions.json` (tag + asset name).
+- Python deps in `backend/requirements.txt` (mirrored into
+  `backend/pyproject.toml`'s `[project] dependencies`).
+- Miniconda URL + SHA256 in `desktop-shell/bootstrap/miniconda.ts`
+  (`MINICONDA_URL` and `MINICONDA_SHA256` constants — re-verified from
+  https://repo.anaconda.com/miniconda/ at pin time).
+- llama.cpp / whisper.cpp / piper binaries: bundling deferred to the
+  follow-up engine-download branch; not in this release's installer.
 
 Bumping any of those means editing the file in a commit. Never re-tag a
 release: the whole point of the pin is that `git checkout v1.0.0` today
@@ -118,8 +130,10 @@ installs:
 - `electron-builder.yml` `extraResources` must keep resolving.
 - `electron.vite.config.ts` `@/` alias must keep resolving to
   `desktop-ui/`.
-- `backend/pyinstaller.spec` `collect_submodules("services" | "routes"
-  | "core")` must keep finding everything.
+- `backend/pyproject.toml` `[tool.setuptools.packages.find]` must keep
+  including `core*` / `routes*` / `services*`; data files
+  (`core/templates/*`, `core/config/*`) must stay in
+  `[tool.setuptools.package-data]`.
 
 ## Security benchmarks (AgentDojo)
 

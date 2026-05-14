@@ -62,10 +62,17 @@ mapping tables that join on opaque IDs to the source rows.
 
 - `npm run dev` — electron-vite dev mode + sidecar in subprocess.
 - `npm run build` — produces `out/main`, `out/preload`, `out/renderer`.
-- `npm run build:sidecar` — PyInstaller bundles `backend/` into
-  `branding/sidecar-bundle/` for `electron-builder.yml` `extraResources`.
-- `npm run dist` — chains the above and runs electron-builder for an
-  NSIS Windows installer.
+- `npm run dist` — chains build + electron-builder for an NSIS Windows
+  installer. The installer ships only the Electron shell + the backend
+  source tree (as `resources/sidecar/`); no Python, no PyInstaller exe,
+  no engine binaries.
+
+The Python sidecar is **installed on the user's machine at first launch**
+via the BootstrapWizard, not at build time. See `desktop-shell/bootstrap/`
+for the three-stage installer (`miniconda.ts` → `sidecar_venv.ts` →
+`waitForSidecarReady`) and `backend/pyproject.toml` for the
+`[project.scripts] altosymbiosis-server = "server:main"` entry point that
+pip generates as `Scripts/altosymbiosis-server.exe` inside the per-app venv.
 
 ## User-facing labels
 
