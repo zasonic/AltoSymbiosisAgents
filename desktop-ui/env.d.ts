@@ -2,6 +2,10 @@
 
 import type { SidecarStatus } from "../desktop-shell/sidecar-types";
 
+export type BootstrapProgressEvent =
+  | { step: number; pct: number; phase?: string; message?: string; error?: undefined }
+  | { step: number; pct?: undefined; error: { label: string; cause: string; logPath: string } };
+
 export interface SidecarInfo {
   port: number;
   token: string;
@@ -27,10 +31,16 @@ export interface ElectronAPI {
   isBootstrapped: () => Promise<boolean>;
   recheckBootstrap: () => Promise<boolean>;
   getPlatform: () => Promise<NodeJS.Platform>;
-  /** Dev-only; removed in commit 4 when `bootstrap:start` lands. */
-  installMiniconda: () => Promise<{ ok: true; target: string }>;
-  /** Dev-only; removed in commit 4 when `bootstrap:start` lands. */
-  installSidecarVenv: () => Promise<{ ok: true; sourceDir: string }>;
+  startBootstrap: () => Promise<
+    | { ok: true }
+    | { ok: false; error: { label: string; cause: string } }
+  >;
+  onBootstrapProgress: (
+    handler: (event: BootstrapProgressEvent) => void,
+  ) => () => void;
+  onBootstrapDone: (handler: () => void) => () => void;
+  resetBin: () => Promise<{ ok: true; removed: string }>;
+  openBootstrapLogs: () => Promise<{ ok: true; path: string }>;
   onSidecarStatus: (handler: (status: SidecarStatus) => void) => () => void;
   onUpdateAvailable: (
     handler: (info: { version: string; notesUrl?: string }) => void,

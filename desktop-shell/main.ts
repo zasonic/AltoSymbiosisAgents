@@ -11,11 +11,19 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from "electron";
 import { autoUpdater } from "electron-updater";
 import { createWriteStream, existsSync, mkdirSync, statSync, renameSync, WriteStream } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { getBinRoot, getResourceDir, isBootstrapped } from "./bootstrap/bin_manager";
+import {
+  getBinRoot,
+  getMinicondaPython,
+  getResourceDir,
+  getSidecarEntryPoint,
+  isBootstrapped,
+  SidecarBootError,
+  waitForSidecarReady,
+} from "./bootstrap/bin_manager";
 import { downloadAndInstallMiniconda } from "./bootstrap/miniconda";
 import { createSidecarVenv } from "./bootstrap/sidecar_venv";
 import { SidecarManager } from "./sidecar";
@@ -31,6 +39,7 @@ const PROJECT_ROOT = app.isPackaged
 let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarManager | null = null;
 let mainLogStream: WriteStream | null = null;
+let bootstrapLogStream: WriteStream | null = null;
 let updaterTimer: NodeJS.Timeout | null = null;
 // Cached result of bootstrap/bin_manager.isBootstrapped(), populated once in
 // whenReady() and refreshed via the app:recheck-bootstrap IPC handler. The
@@ -39,6 +48,7 @@ let updaterTimer: NodeJS.Timeout | null = null;
 let bootstrappedCache: boolean | null = null;
 
 const MAIN_LOG_MAX_BYTES = 10 * 1024 * 1024; // 10MB
+const BOOTSTRAP_LOG_MAX_BYTES = 10 * 1024 * 1024; // 10MB — mirrors sidecar.log
 
 function logToFile(text: string): void {
   try {
@@ -46,6 +56,18 @@ function logToFile(text: string): void {
   } catch {
     /* ignore */
   }
+}
+
+function bootstrapLog(text: string): void {
+  // Bootstrap-specific log so the wizard's "Open log folder" button has a
+  // dedicated file to point users at. Also mirrored into main.log via
+  // logToFile so the full session timeline stays in one place.
+  try {
+    bootstrapLogStream?.write(text);
+  } catch {
+    /* ignore */
+  }
+  logToFile(text);
 }
 
 // Per-handler call timestamps (epoch ms) for the IPC sliding-window rate limiter.
@@ -92,6 +114,56 @@ function bootMainLog(userDataDir: string): void {
   }
   mainLogStream = createWriteStream(path, { flags: "a" });
   logToFile(`\n=== main starting at ${new Date().toISOString()} ===\n`);
+}
+
+function bootBootstrapLog(userDataDir: string): void {
+  // Mirrors bootMainLog's rotation logic for the bootstrap-specific log file.
+  // Wizard's "Open log folder" action surfaces this path to users so they
+  // have a single file to read when reporting install failures.
+  if (!existsSync(userDataDir)) mkdirSync(userDataDir, { recursive: true });
+  const path = join(userDataDir, "bootstrap.log");
+  try {
+    if (existsSync(path) && statSync(path).size > BOOTSTRAP_LOG_MAX_BYTES) {
+      try {
+        renameSync(path, `${path}.1`);
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  bootstrapLogStream = createWriteStream(path, { flags: "a" });
+  bootstrapLog(`\n=== bootstrap log opened at ${new Date().toISOString()} ===\n`);
+}
+
+/**
+ * Convert a thrown error into a labeled `bootstrap:progress` payload and
+ * forward to the wizard. Recognises the labeled error classes from
+ * miniconda.ts / sidecar_venv.ts / bin_manager.ts so the wizard can branch
+ * its retry copy on `error.label`; anything else surfaces as a generic
+ * "BootstrapError" with the raw message.
+ */
+function sendBootstrapError(
+  send: (channel: string, payload?: unknown) => void,
+  step: number,
+  err: unknown,
+  sidecarLogPath: string,
+): { ok: false; error: { label: string; cause: string } } {
+  const label =
+    err instanceof Error && "label" in err && typeof (err as { label: unknown }).label === "string"
+      ? ((err as { label: string }).label)
+      : "BootstrapError";
+  const cause = err instanceof Error ? err.message : String(err);
+  // logPath: SidecarBootError points users at sidecar.log (the failure
+  // happened post-spawn, so uvicorn's stderr is captured there); every
+  // other phase points at bootstrap.log.
+  const logPath = err instanceof SidecarBootError
+    ? sidecarLogPath
+    : join(app.getPath("userData"), "bootstrap.log");
+  bootstrapLog(`step${step} FAILED: [${label}] ${cause}\n`);
+  send("bootstrap:progress", { step, error: { label, cause, logPath } });
+  return { ok: false, error: { label, cause } };
 }
 
 function wireSidecarAuthHeader(targetSession: Electron.Session): void {
@@ -340,41 +412,132 @@ function wireIpc(): void {
   });
   ipcMain.handle("app:platform", () => process.platform);
 
-  // Dev-only Miniconda installer hook for commit-2 manual verification.
-  // Commit 4's `bootstrap:start` supersedes this — it's deleted then. Refuses
-  // in packaged builds so a curious renderer in production can't trigger a
-  // 600 MB download.
-  ipcMain.handle("bootstrap:install-miniconda", async () => {
-    if (app.isPackaged) {
-      throw new Error("bootstrap:install-miniconda is dev-only");
+  // ── Bootstrap orchestrator ────────────────────────────────────────────────
+  //
+  // Single end-to-end install flow driving the BootstrapWizard. Three phases,
+  // each skipped if its terminal artifact already exists so a Retry after a
+  // SidecarBootError doesn't redo the 600 MB Miniconda download.
+  //
+  //   step 1 "Downloading Python"     — skipped if bin/miniconda/python.exe exists
+  //   step 2 "Setting up environment" — skipped if bin/sidecar-venv/Scripts/altosymbiosis-server.exe exists
+  //   step 3 "Almost done"            — always runs; spawn sidecar + waitForSidecarReady(30s)
+  //
+  // Progress streams via bootstrap:progress (server→renderer):
+  //   { step, pct, phase?, message? }                                  during work
+  //   { step, pct: 100 } then bootstrap:done                           on success
+  //   { step, error: { label, cause, logPath } }                       on failure
+  //
+  // The renderer flips Zustand `bootstrapped` to true only on bootstrap:done
+  // so failure modes 1-3 (spawn failure, post-PORT app-init crash, slow cold
+  // start) stay in the wizard error card instead of leaking to the chat UI.
+  ipcMain.handle("bootstrap:start", async () => {
+    const send = (channel: string, payload?: unknown): void => {
+      mainWindow?.webContents.send(channel, payload);
+    };
+    const sourceDir = getResourceDir("sidecar");
+    const userDataDir = app.getPath("userData");
+    const sidecarLogPath = join(userDataDir, "sidecar.log");
+    bootstrapLog(`bootstrap:start invoked at ${new Date().toISOString()}\n`);
+
+    // ── Step 1: Miniconda ──
+    if (existsSync(getMinicondaPython())) {
+      bootstrapLog("step1: miniconda already installed, skipping\n");
+      send("bootstrap:progress", { step: 1, pct: 100, phase: "skipped" });
+    } else {
+      send("bootstrap:progress", { step: 1, pct: 0, phase: "download" });
+      try {
+        await downloadAndInstallMiniconda(
+          join(getBinRoot(), "miniconda"),
+          (pct, phase) => {
+            send("bootstrap:progress", { step: 1, pct, phase });
+            if (pct % 25 === 0) {
+              bootstrapLog(`step1 ${phase}: ${pct}%\n`);
+            }
+          },
+        );
+      } catch (err) {
+        return sendBootstrapError(send, 1, err, sidecarLogPath);
+      }
+      send("bootstrap:progress", { step: 1, pct: 100 });
     }
-    const target = join(getBinRoot(), "miniconda");
-    logToFile(`bootstrap: install-miniconda → ${target}\n`);
-    await downloadAndInstallMiniconda(target, (pct, phase) => {
-      logToFile(`bootstrap: miniconda ${phase} ${pct}%\n`);
-    });
-    // Invalidate the cached `isBootstrapped` result so the next renderer call
-    // re-runs the smoke test against the freshly-installed Miniconda.
-    bootstrappedCache = null;
-    return { ok: true, target };
+
+    // ── Step 2: Sidecar venv ──
+    if (existsSync(getSidecarEntryPoint())) {
+      bootstrapLog("step2: sidecar-venv entry point exists, skipping\n");
+      send("bootstrap:progress", { step: 2, pct: 100, phase: "skipped" });
+    } else {
+      send("bootstrap:progress", { step: 2, pct: 0, phase: "venv" });
+      try {
+        await createSidecarVenv(sourceDir, (subPct, phase, message) => {
+          // Interpolate the three sub-phases (venv / pip-upgrade / pip)
+          // into step 2's 0..99 range; pip dominates so it gets half.
+          let mapped = 0;
+          if (phase === "venv") mapped = Math.floor(subPct * 0.33);
+          else if (phase === "pip-upgrade") mapped = 33 + Math.floor(subPct * 0.17);
+          else mapped = 50 + Math.floor(subPct * 0.49);
+          // subPct < 0 means "indeterminate" (pip's --quiet fallback);
+          // forward as-is so the wizard can show a spinner.
+          send("bootstrap:progress", {
+            step: 2,
+            pct: subPct < 0 ? subPct : mapped,
+            phase,
+            message,
+          });
+          bootstrapLog(
+            `step2 ${phase}: ${subPct}% (mapped=${mapped})${message ? ` — ${message}` : ""}\n`,
+          );
+        });
+      } catch (err) {
+        return sendBootstrapError(send, 2, err, sidecarLogPath);
+      }
+      send("bootstrap:progress", { step: 2, pct: 100 });
+    }
+
+    // ── Step 3: Boot sidecar + waitForSidecarReady ──
+    send("bootstrap:progress", { step: 3, pct: 50, phase: "sidecar-boot" });
+    bootstrapLog("step3: starting sidecar and waiting for /health 200\n");
+    try {
+      const mgr = startSidecar(userDataDir);
+      await waitForSidecarReady(mgr, 30_000);
+    } catch (err) {
+      return sendBootstrapError(send, 3, err, sidecarLogPath);
+    }
+
+    // ── Success ──
+    bootstrappedCache = true;
+    send("bootstrap:progress", { step: 3, pct: 100 });
+    send("bootstrap:done");
+    bootstrapLog(`bootstrap:done at ${new Date().toISOString()}\n`);
+    return { ok: true };
   });
 
-  // Dev-only sidecar-venv installer hook for commit-3 manual verification.
-  // Runs venv create + pip self-upgrade + pip install of the sidecar package
-  // from <projectRoot>/backend (editable in dev). Commit 4's `bootstrap:start`
-  // supersedes this — it's deleted then. Refused in packaged builds.
-  ipcMain.handle("bootstrap:install-sidecar-venv", async () => {
-    if (app.isPackaged) {
-      throw new Error("bootstrap:install-sidecar-venv is dev-only");
+  // Recursive delete of <userData>/bin so the user can wipe a half-installed
+  // tree and start over. Force-resets the cached isBootstrapped flag too.
+  ipcMain.handle("bootstrap:reset-bin", async () => {
+    const binRoot = getBinRoot();
+    bootstrapLog(`bootstrap:reset-bin → rm -rf ${binRoot}\n`);
+    // Stop the sidecar first if it's running — otherwise file locks on
+    // Windows will keep the entry-point .exe pinned and the rm will fail.
+    if (sidecar) {
+      try {
+        await sidecar.stop();
+      } catch {
+        /* best-effort */
+      }
+      sidecar = null;
     }
-    const sourceDir = getResourceDir("sidecar");
-    logToFile(`bootstrap: install-sidecar-venv ← ${sourceDir}\n`);
-    await createSidecarVenv(sourceDir, (pct, phase, message) => {
-      const msg = message ? ` (${message})` : "";
-      logToFile(`bootstrap: sidecar-venv ${phase} ${pct}%${msg}\n`);
-    });
-    bootstrappedCache = null;
-    return { ok: true, sourceDir };
+    await rm(binRoot, { recursive: true, force: true });
+    bootstrappedCache = false;
+    return { ok: true, removed: binRoot };
+  });
+
+  // Opens the userData dir in the OS file explorer. Bootstrap.log and
+  // sidecar.log both live there, so the user can hand them off to support
+  // without having to navigate APPDATA themselves.
+  ipcMain.handle("bootstrap:open-logs", async () => {
+    const userDataDir = app.getPath("userData");
+    await shell.openPath(userDataDir);
+    return { ok: true, path: userDataDir };
   });
 
   ipcMain.handle(
@@ -542,20 +705,34 @@ async function wireAutoUpdater(): Promise<void> {
   }, UPDATE_POLL_INTERVAL_MS);
 }
 
-async function bootSidecar(userDataDir: string): Promise<void> {
+function startSidecar(userDataDir: string): SidecarManager {
+  // Create + wire the SidecarManager and kick off `start()` in the
+  // background. Callers consume readiness via the status event (the
+  // bootstrap:start handler uses waitForSidecarReady; whenReady's
+  // bootSidecar wrapper awaits the same way). Splitting "spawn" from
+  // "wait" lets bootstrap:start observe status transitions without
+  // double-awaiting .start().
   sidecar = new SidecarManager(PROJECT_ROOT, userDataDir);
-
   sidecar.on("status", (status) => {
     mainWindow?.webContents.send("sidecar:status", status);
     logToFile(`sidecar status: ${JSON.stringify(status)}\n`);
   });
+  sidecar.start().catch((err) => {
+    logToFile(`sidecar.start rejected: ${err instanceof Error ? err.message : err}\n`);
+    // Status: crashed has already fired from inside SidecarManager.
+  });
+  return sidecar;
+}
 
+async function bootSidecar(userDataDir: string): Promise<void> {
+  // Used by app.whenReady() once the bin/ tree is in place. Wait up to 30s
+  // for ready so the chat UI doesn't render before the sidecar is alive;
+  // on failure, the existing renderer status handler shows the error UI.
+  const mgr = startSidecar(userDataDir);
   try {
-    await sidecar.start();
+    await waitForSidecarReady(mgr, 30_000);
   } catch (err) {
-    logToFile(`sidecar.start failed: ${err instanceof Error ? err.message : err}\n`);
-    // Window opens anyway so the renderer can show the error UI with a
-    // "Restart Backend" button. The status event has already fired.
+    logToFile(`bootSidecar: ${err instanceof Error ? err.message : err}\n`);
   }
 }
 
@@ -578,6 +755,7 @@ app.whenReady().then(async () => {
 
   const userDataDir = app.getPath("userData");
   bootMainLog(userDataDir);
+  bootBootstrapLog(userDataDir);
 
   // Compute bootstrap readiness BEFORE opening the window so the renderer's
   // first paint can already gate on the cached boolean — avoids a flash of
@@ -623,11 +801,15 @@ app.on("before-quit", async (event) => {
     sidecar = null;
     mainLogStream?.end();
     mainLogStream = null;
+    bootstrapLogStream?.end();
+    bootstrapLogStream = null;
     app.exit(0);
     return;
   }
   // Sidecar already torn down (e.g. via update:install-now). Still flush
-  // the main log so the final lines from this session aren't truncated.
+  // the log streams so the final lines from this session aren't truncated.
   mainLogStream?.end();
   mainLogStream = null;
+  bootstrapLogStream?.end();
+  bootstrapLogStream = null;
 });

@@ -26,10 +26,13 @@
 import { app } from "electron";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import type { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import type { SidecarStatus } from "../sidecar-types";
 
 // Mirrors PROJECT_ROOT in main.ts. In a packaged build the path resolves to a
 // location inside the asar archive that doesn't exist on disk; only the dev
@@ -98,6 +101,69 @@ export async function isBootstrapped(): Promise<boolean> {
   if (!existsSync(getSidecarEntryPoint())) return false;
 
   return runSidecarSmokeTest();
+}
+
+export class SidecarBootError extends Error {
+  readonly label = "SidecarBootError";
+  constructor(
+    public readonly cause: string,
+    public readonly logPath?: string,
+  ) {
+    super(`Sidecar failed to reach ready: ${cause}`);
+    this.name = "SidecarBootError";
+  }
+}
+
+/**
+ * Subscribe to a SidecarManager's status event and resolve when the sidecar
+ * reaches `ready`, or reject with a SidecarBootError on `crashed` or
+ * timeout. Used by the bootstrap:start IPC handler to gate the wizard's
+ * final `bootstrap:done` event on the sidecar actually serving /health —
+ * without this, three real failure modes leak into the chat UI instead of
+ * staying in the wizard error card:
+ *   1. Sidecar spawn fails (port collision, missing entry point).
+ *   2. Sidecar starts uvicorn but app init throws before /health
+ *      (sqlite-vec load error, anything past PORT= but before READY).
+ *   3. Slow first cold start exceeds whatever poll the chat UI tolerates.
+ *
+ * `timeoutMs` defaults to 30s — enough for a cold first boot on slow disks
+ * while still surfacing genuine hangs to the user. Pass the existing
+ * SidecarManager (it extends EventEmitter) as the first arg.
+ */
+export function waitForSidecarReady(
+  sidecar: EventEmitter,
+  timeoutMs = 30_000,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const onStatus = (s: SidecarStatus): void => {
+      if (settled) return;
+      if (s.status === "ready") {
+        settled = true;
+        sidecar.off("status", onStatus);
+        clearTimeout(timer);
+        resolve();
+      } else if (s.status === "crashed") {
+        settled = true;
+        sidecar.off("status", onStatus);
+        clearTimeout(timer);
+        reject(
+          new SidecarBootError(
+            s.error ?? `crashed (code=${s.code}, signal=${s.signal})`,
+          ),
+        );
+      }
+      // 'starting' is the expected interim state; 'stopped' only fires on
+      // explicit shutdown which doesn't happen during bootstrap:start.
+    };
+    sidecar.on("status", onStatus);
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      sidecar.off("status", onStatus);
+      reject(new SidecarBootError(`timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
 }
 
 async function runSidecarSmokeTest(): Promise<boolean> {
