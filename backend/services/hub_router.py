@@ -408,12 +408,14 @@ class HubRouter:
                 result = client.stream_unified(system, messages, on_token, max_tokens=local_max)
             else:
                 result = client.chat_unified(system, messages, max_tokens=local_max)
+            raw_logprobs = result.get("logprobs") if isinstance(result, dict) else None
             return WorkerResult(
                 text=result["text"],
                 backend=decision.backend,
                 model_name=client.client_name(),
                 input_tokens=result.get("input_tokens", 0),
                 output_tokens=result.get("output_tokens", 0),
+                logprobs=tuple(raw_logprobs) if raw_logprobs else None,
             )
         except Exception as exc:
             log.error("%s invocation failed: %s", decision.backend, exc)

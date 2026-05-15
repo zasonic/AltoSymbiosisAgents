@@ -38,6 +38,13 @@ class TurnContext:
     on_event:        Optional[Callable[[str, dict], None]] = None
     on_token:        Optional[Callable[[str], None]] = None
 
+    # QLPT Stage 1: per-token logprobs the worker produced for the local
+    # generation. Populated by ChatOrchestrator after worker_dispatch
+    # returns; read by EscalationLadder when deciding whether to score
+    # with services.margin_proxy or fall back to the self-score LLM call.
+    # None when the backend did not surface logprobs.
+    worker_logprobs: Optional[tuple[float, ...]] = None
+
     # Lifecycle bookkeeping ──────────────────────────────────────────────
     user_msg_id:     str = ""                                  # set by TurnLifecycle on user-msg INSERT
     # Layer C1: per-turn correlation id. Generated in TurnLifecycle.open()

@@ -25,6 +25,7 @@ import logging
 from dataclasses import dataclass
 
 from models import RoutingDecision
+from services import margin_proxy
 from services.turn_context import TurnContext
 
 log = logging.getLogger("altosybioagents.escalation_ladder")
@@ -64,9 +65,18 @@ class EscalationOutcome:
 class EscalationLadder:
     """Owns the local-fail → claude-rescue control flow."""
 
-    def __init__(self, hub_router, local_client):
+    def __init__(self, hub_router, local_client, settings=None):
         self._hub = hub_router
         self._local = local_client
+        # QLPT Stage 1: settings is optional so existing test construction
+        # ``EscalationLadder(hub, local)`` keeps working. When None, the
+        # margin-proxy flag is treated as False and the ladder behaves
+        # exactly as it did pre-Stage-1.
+        self._settings = settings
+        # Per-call scratchpad: records which scorer produced the latest
+        # _quality_score result so maybe_escalate can label the escalation
+        # reason for auditability. Reset on every _quality_score call.
+        self._last_score_path: str = "self-score"
 
     def maybe_escalate(
         self,
@@ -114,12 +124,28 @@ class EscalationLadder:
                 reason="local response empty; escalated",
             )
         else:
-            score = self._quality_score(ctx.user_message, response_text)
+            score = self._quality_score(
+                ctx.user_message, response_text,
+                logprobs=ctx.worker_logprobs,
+            )
             if score is not None and score < QUALITY_ESCALATION_THRESHOLD:
                 log.info("Local response scored %s — escalating to Claude", score)
+                # QLPT Stage 1: label which scorer produced the score so
+                # offline analysis can split escalation rates by path
+                # without having to re-derive them from telemetry. Keep
+                # the bare reason string for the self-score path so the
+                # existing test_escalation_ladder.py assertions on the
+                # exact string keep passing unmodified.
+                if self._last_score_path == "margin proxy":
+                    reason = (
+                        "local response failed quality gate (margin proxy); "
+                        "escalated"
+                    )
+                else:
+                    reason = "local response failed quality gate; escalated"
                 self._escalate(
                     outcome, decision, full_system, messages, target, ctx.on_token,
-                    reason="local response failed quality gate; escalated",
+                    reason=reason,
                 )
 
         # Bug 4: response_empty must reflect the POST-escalation text, not
@@ -193,12 +219,57 @@ class EscalationLadder:
         outcome.escalated = True
         outcome.escalation_reason = reason
 
-    def _quality_score(self, user_message: str, response_text: str):
-        """Self-rated local quality score, or None if unparseable.
+    def _quality_score(
+        self,
+        user_message: str,
+        response_text: str,
+        logprobs: tuple[float, ...] | None = None,
+    ):
+        """Quality score on the same 0..10 scale, or None if unscorable.
 
-        We stay on local-first to keep the gate cheap; Claude is the
-        rescue, not the judge.
+        QLPT Stage 1 decision tree:
+          1. If ``escalation_use_margin_proxy`` is True AND the worker
+             produced logprobs, score with services.margin_proxy. The
+             margin-proxy path is pure and ~free (no extra LLM call).
+          2. Otherwise, run the legacy self-score path: a second local
+             LLM call that asks the model to rate its own answer. Stays
+             on local-first to keep the gate cheap; Claude is the
+             rescue, not the judge.
+
+        Returns None on any error so the caller skips escalation
+        (graceful degradation).
         """
+        # Reset the audit trail before either branch so a stale value
+        # from a previous turn can't leak into the escalation reason.
+        self._last_score_path = "self-score"
+
+        if (
+            self._settings is not None
+            and self._settings.get("escalation_use_margin_proxy", False)
+            and logprobs
+        ):
+            params_override = self._settings.get("escalation_margin_proxy_params", None)
+            try:
+                score = margin_proxy.score_from_logprobs(
+                    list(logprobs), params_override=params_override,
+                )
+            except Exception as exc:
+                log.debug("margin_proxy.score_from_logprobs raised: %s", exc)
+                score = None
+            if score is not None:
+                self._last_score_path = "margin proxy"
+                if self._settings.get("escalation_log_margin_proxy_scores", False):
+                    # Log the raw array alongside the score so the data
+                    # can be re-aggregated offline (geometric mean,
+                    # min-token, etc.) without re-running inference.
+                    log.info(
+                        "margin_proxy score=%.3f logprobs_len=%d raw=%s",
+                        score, len(logprobs), list(logprobs),
+                    )
+                return score
+            # Margin proxy returned None (e.g. empty / non-numeric input).
+            # Fall through to the self-score path so the gate still fires.
+
         try:
             from services.task_artifacts import local_first_call
             quality_raw = local_first_call(

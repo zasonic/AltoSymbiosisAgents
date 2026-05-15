@@ -239,8 +239,10 @@ class ChatOrchestrator:
             )
         self.hub_router = hub_router
         # Now that hub_router is wired, finish building EscalationLadder.
+        # QLPT Stage 1: settings is threaded in so the ladder can read
+        # the margin-proxy feature flag + override params at call time.
         self._escalation_ladder = self._EscalationLadder(
-            self.hub_router, self._local_client_ref,
+            self.hub_router, self._local_client_ref, self._settings,
         )
         # WorkerDispatch wraps RoutingDecision construction + hub_router.invoke
         # so the orchestrator stops re-implementing the same shell at every
@@ -1683,6 +1685,10 @@ class ChatOrchestrator:
                 tokens_out = worker_result.output_tokens
                 if worker_result.had_error:
                     had_error = True
+                # QLPT Stage 1: hand the worker's per-token logprobs to
+                # the escalation ladder so it can score with margin_proxy
+                # in place of the self-score LLM call when enabled.
+                ctx.worker_logprobs = worker_result.logprobs
 
         # ── Post-assembly alignment check (informational) ───────────────────
         # When an agent was involved, ask the local model whether the worker's
