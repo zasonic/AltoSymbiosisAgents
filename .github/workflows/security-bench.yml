@@ -62,32 +62,51 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # Graceful skip when the repo doesn't have ANTHROPIC_API_KEY configured.
+      # The bench is path-triggered on any PR touching the security/orchestration
+      # surface, so commits that legitimately edit (or just docstring-touch)
+      # those files would otherwise red-X the PR even though no API access is
+      # available. Adds `if: env.ANTHROPIC_API_KEY != ''` to every step that
+      # would actually call the API; pairs with a single "Notice" step that
+      # leaves an Actions annotation when skipping. Add the secret under
+      # Settings → Secrets and variables → Actions to re-enable full coverage.
+      - name: Notice if ANTHROPIC_API_KEY missing
+        if: env.ANTHROPIC_API_KEY == ''
+        run: |
+          echo "::notice::ANTHROPIC_API_KEY secret not configured; skipping AgentDojo bench. Add the secret under Settings → Secrets and variables → Actions to enable."
+
       - name: Install runtime + bench dependencies
+        if: env.ANTHROPIC_API_KEY != ''
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt -r backend/requirements-bench.txt
 
       - name: Run AgentDojo — workspace
+        if: env.ANTHROPIC_API_KEY != ''
         run: |
           python -m backend.tests.agentdojo.run_suites \
             --suite workspace --output benchmarks/workspace.json
 
       - name: Run AgentDojo — slack
+        if: env.ANTHROPIC_API_KEY != ''
         run: |
           python -m backend.tests.agentdojo.run_suites \
             --suite slack --output benchmarks/slack.json
 
       - name: Run AgentDojo — banking
+        if: env.ANTHROPIC_API_KEY != ''
         run: |
           python -m backend.tests.agentdojo.run_suites \
             --suite banking --output benchmarks/banking.json
 
       - name: Run AgentDojo — travel
+        if: env.ANTHROPIC_API_KEY != ''
         run: |
           python -m backend.tests.agentdojo.run_suites \
             --suite travel --output benchmarks/travel.json
 
       - name: Generate BENCHMARKS.md
+        if: env.ANTHROPIC_API_KEY != ''
         run: |
           python build-scripts/generate_benchmarks_md.py \
             --benchmarks-dir benchmarks \
@@ -103,7 +122,7 @@ jobs:
       # git commit exits non-zero and we swallow it so the workflow still
       # goes green.
       - name: Commit results back to main
-        if: github.event_name != 'pull_request'
+        if: env.ANTHROPIC_API_KEY != '' && github.event_name != 'pull_request'
         env:
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com

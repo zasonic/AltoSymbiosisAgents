@@ -54,8 +54,8 @@ export const MINICONDA_SHA256 =
 const INSTALL_POLL_INTERVAL_MS = 500;
 const INSTALL_POLL_MAX_MS = 10 * 60_000; // 10 min wall-clock cap
 
-export type Phase = "download" | "install";
-export type ProgressCallback = (pct: number, phase: Phase) => void;
+type Phase = "download" | "install";
+type ProgressCallback = (pct: number, phase: Phase) => void;
 
 export class DownloadError extends Error {
   readonly label = "DownloadError";
@@ -84,7 +84,7 @@ export class InstallerExitNonZero extends Error {
   }
 }
 
-export interface DownloadOptions {
+interface DownloadOptions {
   /** Override the download URL (test-only). */
   url?: string;
   /** Override the expected SHA256 (test-only). */

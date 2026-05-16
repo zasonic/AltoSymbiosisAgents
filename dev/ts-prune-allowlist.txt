@@ -81,3 +81,24 @@ desktop-ui/types/safety.ts - SafetyGovernance
 desktop-ui/types/safety.ts - SafetyRouting
 desktop-ui/types/safety.ts - SafetyVoting
 desktop-ui/types/usage.ts - UsageTotal
+
+# ── claude/pinokio-pipeline (PR #6): bootstrap modules ─────────────────────
+# Cross-tsconfig boundary: sidecar-types.ts SidecarInfo is consumed by the
+# renderer's env.d.ts (structural shape), not imported by name; sidecar.ts
+# re-exports both types for backwards compatibility with internal callers.
+desktop-shell/sidecar-types.ts - SidecarInfo
+desktop-shell/sidecar.ts - SidecarStatus
+# preload.ts BootstrapProgressEvent mirrors the env.d.ts contract by shape,
+# same pattern as the existing preload.ts SidecarInfo entry above.
+desktop-shell/preload.ts - BootstrapProgressEvent
+# Pinned-version constants — kept exported so audits + future tests can
+# reference them by name without reading magic strings.
+desktop-shell/bootstrap/miniconda.ts - MINICONDA_URL
+desktop-shell/bootstrap/miniconda.ts - MINICONDA_SHA256
+# Labeled error classes — bootstrap:start currently catches via the
+# `.label` duck-type, but the classes stay exported so a future error-card
+# UI in the wizard can do `err instanceof VenvCreateError` for branched
+# recovery hints.
+desktop-shell/bootstrap/sidecar_venv.ts - VenvCreateError
+desktop-shell/bootstrap/sidecar_venv.ts - PipUpgradeError
+desktop-shell/bootstrap/sidecar_venv.ts - PipInstallError

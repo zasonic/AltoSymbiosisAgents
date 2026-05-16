@@ -295,14 +295,22 @@ def main(argv: list[str] | None = None) -> int:
     # write would deadlock the handshake.
     print(f"PORT={port}", flush=True)
 
-    # Hand uvicorn the already-bound socket via fd= so we never release the
-    # port between getsockname() and serve(). Closing + rebinding (the old
-    # behavior) had a brief TOCTOU window where another local process could
-    # claim the port; advertising a port we no longer hold then made
-    # Electron poll a stranger's /health.
+    # Hand uvicorn the already-bound socket directly (via the sockets= kwarg
+    # on serve(), NOT via Config(fd=…)) so we never release the port between
+    # getsockname() and serve(). Closing + rebinding (the old behavior) had
+    # a brief TOCTOU window where another local process could claim the
+    # port; advertising a port we no longer hold then made Electron poll a
+    # stranger's /health.
+    #
+    # Cross-platform note: uvicorn's `Config(fd=…)` path is POSIX-only
+    # (marked `# pragma: py-win32` in uvicorn/server.py — it calls
+    # `socket.fromfd(fd, socket.AF_UNIX, …)` which AttributeErrors on
+    # Windows because socket.AF_UNIX isn't exposed). Passing the bound
+    # socket via `serve(sockets=[sock])` takes the other branch in
+    # uvicorn.Server._serve(), which works on both POSIX and Windows and
+    # still preserves the TOCTOU guard (sock stays bound the whole time).
     config = uvicorn.Config(
         app,
-        fd=sock.fileno(),
         log_level="info",
         access_log=False,
         loop="asyncio",
@@ -330,7 +338,7 @@ def main(argv: list[str] | None = None) -> int:
         ready_task = asyncio.create_task(_emit_ready())
         shutdown_task = asyncio.create_task(app.state.shutdown_event.wait())
 
-        serve_task = asyncio.create_task(server.serve())
+        serve_task = asyncio.create_task(server.serve(sockets=[sock]))
 
         # If POST /shutdown fires, ask uvicorn to exit cleanly. If uvicorn
         # exits on its own (parent killed us), we just fall through.
