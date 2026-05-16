@@ -7,6 +7,7 @@ API facade so we don't touch ChatOrchestrator or any of the deferred init
 paths that would slow tests down.
 """
 
+import asyncio
 import time
 from unittest.mock import MagicMock
 
@@ -20,6 +21,29 @@ from server import BearerAuthMiddleware
 
 
 TOKEN = "test-token-xyz"
+
+
+@pytest.fixture(autouse=True)
+def sse_capture():
+    """Per-test SSE subscriber so tests can assert on published events.
+
+    The per-subscriber pump drops events when no subscriber is registered,
+    so we register one for the duration of every test in this file. A
+    fresh asyncio loop is attached so subscribe() doesn't raise under the
+    startup-order invariant.
+
+    Loop is attached but not run; tests in this file use drain_nowait
+    exclusively. await sub.drain() would block forever here.
+    """
+    loop = asyncio.new_event_loop()
+    sse_events.attach_loop(loop)
+    try:
+        with sse_events.subscribe() as sub:
+            yield sub
+    finally:
+        loop.close()
+        sse_events._loop = None
+        sse_events._subscribers.clear()
 
 
 @pytest.fixture
@@ -66,20 +90,6 @@ def app_with_fake_api(tmp_path):
     app.state.container = fake_container
     app.include_router(system_routes.router, prefix="/api/system")
     return app, settings, fake_bundled
-
-
-def _drain_sse_queue() -> list[dict]:
-    """Pop everything currently queued in the module-level sse_events queue.
-
-    Bypasses ``drain()`` (which awaits an asyncio loop) by reaching into
-    the test-only internals — the queue exposes its lock and items so we
-    can flush synchronously between operations in a TestClient run.
-    """
-    q = sse_events._queue
-    with q._lock:
-        out = list(q._items)
-        q._items.clear()
-    return out
 
 
 def _auth_headers() -> dict:
@@ -221,7 +231,7 @@ class TestBundledDownload:
             time.sleep(0.01)
 
     def test_kicks_off_background_download_and_emits_complete(
-        self, app_with_fake_api,
+        self, app_with_fake_api, sse_capture,
     ):
         app, settings, fake_bundled = app_with_fake_api
         fake_bundled.download_model.return_value = {
@@ -229,7 +239,6 @@ class TestBundledDownload:
             "expected_sha256":     "abc",
             "expected_size_bytes": 1234,
         }
-        _drain_sse_queue()
 
         client = TestClient(app)
         resp = client.post(
@@ -242,18 +251,19 @@ class TestBundledDownload:
         assert resp.json()["model_id"] == "Qwen3-4B-Instruct-Q4_K_M"
 
         self._wait_for_complete(fake_bundled)
-        events = _drain_sse_queue()
+        events = sse_capture.drain_nowait()
         names = [e["event"] for e in events]
         assert "bundled_download_complete" in names
         assert settings.get("local_backend_mode") == "bundled"
         assert settings.get("bundled_model_id") == "Qwen3-4B-Instruct-Q4_K_M"
 
-    def test_emits_error_event_on_bundled_server_error(self, app_with_fake_api):
+    def test_emits_error_event_on_bundled_server_error(
+        self, app_with_fake_api, sse_capture,
+    ):
         from services.bundled_server import BundledServerError
 
         app, settings, fake_bundled = app_with_fake_api
         fake_bundled.download_model.side_effect = BundledServerError("boom")
-        _drain_sse_queue()
 
         client = TestClient(app)
         resp = client.post(
@@ -264,7 +274,7 @@ class TestBundledDownload:
         assert resp.status_code == 200
 
         self._wait_for_complete(fake_bundled)
-        events = _drain_sse_queue()
+        events = sse_capture.drain_nowait()
         names = [e["event"] for e in events]
         assert "bundled_download_error" in names
         # local_backend_mode must NOT be flipped on a failed download.
