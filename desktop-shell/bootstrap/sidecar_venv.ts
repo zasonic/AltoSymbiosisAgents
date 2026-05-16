@@ -29,8 +29,8 @@ import { dirname, join } from "node:path";
 
 import { getBinRoot, getSidecarPython } from "./bin_manager";
 
-export type Phase = "venv" | "pip-upgrade" | "pip";
-export type ProgressCallback = (pct: number, phase: Phase, message?: string) => void;
+type Phase = "venv" | "pip-upgrade" | "pip";
+type ProgressCallback = (pct: number, phase: Phase, message?: string) => void;
 
 export class VenvCreateError extends Error {
   readonly label = "VenvCreateError";
@@ -68,7 +68,7 @@ export class PipInstallError extends Error {
   }
 }
 
-export interface CreateSidecarVenvOptions {
+interface CreateSidecarVenvOptions {
   /** False (default) ⇒ editable=true in dev, false in packaged. True/false override for tests. */
   editable?: boolean;
   /** Override the source dir picker (test only). */
@@ -196,7 +196,7 @@ async function runPipInstall(
  *   "Progress 50%"              (very old format — pct directly)
  * Returns null if the line isn't a progress event.
  */
-export function parseRawProgress(line: string): { pct: number } | null {
+function parseRawProgress(line: string): { pct: number } | null {
   const m1 = /^Progress\s+(\d+)\s*(?:of|\/)\s*(\d+)/.exec(line);
   if (m1) {
     const done = Number.parseInt(m1[1], 10);
