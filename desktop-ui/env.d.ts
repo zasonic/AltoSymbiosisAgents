@@ -43,7 +43,7 @@ export interface ElectronAPI {
   openBootstrapLogs: () => Promise<{ ok: true; path: string }>;
   onSidecarStatus: (handler: (status: SidecarStatus) => void) => () => void;
   onUpdateAvailable: (
-    handler: (info: { version: string; notesUrl?: string }) => void,
+    handler: (info: { version: string; notesUrl?: string; downloadUrl?: string }) => void,
   ) => () => void;
   onUpdateDownloaded: (handler: (info: { version: string }) => void) => () => void;
   installUpdate: () => Promise<void>;
