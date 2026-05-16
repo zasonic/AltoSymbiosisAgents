@@ -32,7 +32,7 @@ Three processes, one user-facing app.
   scores agents by skill match, falls back to Qwen3 /no_think for
   ambiguous routes.
 - `services/security_engine.py` — quarantine, deterministic rule
-  enforcement, risk ledger.
+  enforcement.
 - `services/memory/` — buffer, fact store, RAG retrieval (package).
 - `services/governance.py` — per-agent tool/budget policy.
 - `services/qwen_thinking.py` — Qwen3 hybrid /think + /no_think paths.
