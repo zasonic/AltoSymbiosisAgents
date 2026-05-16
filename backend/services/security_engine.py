@@ -14,10 +14,13 @@ Defense 1 — Context Quarantine (RAG injection)
     delimiters the model can distinguish from instructions. Caps per-source
     influence. Does NOT attempt to classify content as safe/unsafe.
 
-Defense 2 — Risk Ledger (tool/workflow risk scoring)
-    Calibrated from AgentDojo per-suite ASR, InjecAgent per-tool vulnerability,
-    and SafetyDrift task-category Markov probabilities. Tracks cumulative risk
-    per workflow with hard abort thresholds.
+Defense 2 — Risk Ledger primitive (NOT wired to production)
+    Maintained as a measurement primitive for AgentDojo / InjecAgent
+    benchmark harnesses (see backend/tests/agentdojo/). Calibrating
+    per-turn weights to a non-degenerate threshold requires attack
+    data this app does not have, so the production chat path does
+    not gate on RiskLedger. The primitive remains available for
+    offline benchmark work.
 
 Defense 3 — Memory Firewall (memory poisoning)
     TTL enforcement, source attestation, structural validation before write,
@@ -179,7 +182,7 @@ def render_quarantined_context(chunks: list[QuarantinedChunk]) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DEFENSE 2: Risk Ledger
+# DEFENSE 2: Risk Ledger (research primitive, not wired to production)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class RiskCategory(str, Enum):
