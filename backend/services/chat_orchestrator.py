@@ -219,7 +219,10 @@ class ChatOrchestrator:
         # TurnRouter wraps the agent.model_preference override around
         # TaskRouter.classify(); see services/turn_router.py.
         self._turn_router = TurnRouter(router)
-        # SecurityGate owns quarantine + deterministic rule enforcement.
+        # SecurityGate owns the quarantine + rule-engine + sliding-window
+        # risk ledger. Bug 7's LRU cap on the per-conversation history
+        # dict lives inside it; delete_conversation calls .forget() to
+        # evict on archival.
         self._security_gate = SecurityGate()
         # EscalationLadder is constructed below, after hub_router is wired.
         self._EscalationLadder = EscalationLadder
@@ -311,6 +314,10 @@ class ChatOrchestrator:
                 (conversation_id,),
             )
             conn.commit()
+        # Drop the in-memory per-conversation risk history too. Without
+        # this, the dict accumulated entries forever — every send to a
+        # new conversation_id added one and nothing ever removed them.
+        self._security_gate.forget(conversation_id)
 
     def branch_conversation(self, conversation_id: str,
                             from_message_id: str) -> dict:
@@ -1261,9 +1268,25 @@ class ChatOrchestrator:
         # Runs AFTER context assembly, AFTER hooks, BEFORE any model call.
         # Uses deterministic rules (not classifiers) — can't be prompt-injected.
         # ══════════════════════════════════════════════════════════════════════
-        # SecurityGate runs quarantine + deterministic rule enforcement.
+        # Layer 3 extraction: SecurityGate owns quarantine + rule engine +
+        # sliding-window risk ledger (Bug 7 LRU lives inside it). Returns
+        # an updated full_system and a SecurityResult with the abort flag.
         security_result = self._security_gate.evaluate(ctx, full_system, mem, target)
         full_system = security_result.full_system
+        security = security_result.assessment
+        if security_result.blocked:
+            return ChatResult(
+                text=(
+                    f"\U0001f6e1️ This workflow has been paused because the cumulative "
+                    f"risk score ({security.risk_assessment.cumulative_score:.1f}) "
+                    f"exceeds the safety threshold. This happens when a conversation "
+                    f"involves many high-risk operations. Start a new conversation "
+                    f"or adjust the risk threshold in Settings."
+                ),
+                model="", route_reason="security_abort",
+                tokens_in=0, tokens_out=0, cost_usd=0.0,
+                message_id=str(uuid.uuid4()),
+            )
 
         # ══════════════════════════════════════════════════════════════════════
 
@@ -1338,6 +1361,10 @@ class ChatOrchestrator:
         voting_enabled = bool(
             self._settings.get("high_stakes_voting_enabled", True)
         )
+        risk_score = (
+            security.risk_assessment.cumulative_score
+            if security.risk_assessment else 0.0
+        )
         escalation_will_trigger = (
             self._governance.escalation_channel.would_trigger(
                 user_message, full_system,
@@ -1346,6 +1373,7 @@ class ChatOrchestrator:
         is_high_stakes = (
             escalation_will_trigger
             or is_high_stakes_message(user_message)
+            or risk_score > 0.7
         )
         # Voting only fires when the resolved target is Claude. Local-only
         # turns skip it (3x latency on a local model is too painful).
