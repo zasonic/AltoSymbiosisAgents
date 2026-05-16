@@ -22,11 +22,6 @@ explaining why removing it would actually break something.
 # chained assignment that re-binds it.
 ScanDecision
 
-# docker_manager.py:329 — ``_build_detail`` keeps ``wsl`` in its signature
-# even though the current body branches only on the other flags. Callers
-# pass ``wsl=...`` positionally for clarity; renaming silently breaks them.
-wsl
-
 # semantic_search.py:94 — ``init_vector_store`` accepts ``vector_dir`` and
 # ``shared_model`` as forward-compat parameters: core/paths and the
 # bundled-server bootstrap will override them once the migration lands.

@@ -114,9 +114,29 @@ export class SidecarManager extends EventEmitter {
       const { command, args } = this.resolveSpawnArgs();
       this.logToFile(`spawn: ${command} ${redactArgs(args).join(" ")}\n`);
 
+      // Curated env for the bundled sidecar: a fixed allowlist of parent
+      // process.env keys plus our two PYTHON* overrides. Avoids leaking
+      // unrelated user environment (notably a shell's PYTHONPATH) into the
+      // bundled venv, where it would shadow pinned dependencies.
+      const ENV_ALLOWLIST = [
+        "PATH", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOME",
+        "SystemRoot", "ProgramData", "ComSpec", "USERNAME", "OS",
+        "NUMBER_OF_PROCESSORS", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+        "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE", "LANG", "LC_ALL",
+      ] as const;
+      const childEnv: Record<string, string> = {};
+      for (const key of ENV_ALLOWLIST) {
+        const value = process.env[key];
+        if (typeof value === "string" && value.length > 0) {
+          childEnv[key] = value;
+        }
+      }
+      childEnv.PYTHONUNBUFFERED = "1";
+      childEnv.PYTHONIOENCODING = "utf-8";
+
       this.child = spawn(command, args, {
         cwd: this.sidecarCwd(),
-        env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8" },
+        env: childEnv,
         windowsHide: true,
       });
 

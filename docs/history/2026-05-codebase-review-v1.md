@@ -1,3 +1,5 @@
+> **CLOSED HISTORICAL REVIEW.** All 13 items below were resolved in commits leading up to v1.0.0-test.1. This document is preserved for historical context only. Do not treat it as a live bug list. For current issues see GitHub Issues or run a fresh audit.
+
 # Codebase Review Report
 
 Findings from a full read of the altosybioagents codebase, organized by severity (most likely to cause real user-facing problems first). Each finding has been verified against the source at the cited file:line locations.
