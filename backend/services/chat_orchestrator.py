@@ -21,10 +21,9 @@ produced it, token counts, USD cost, the persisted message_id, and any
 budget warning. Routing is delegated to HubRouter.route_for_agent /
 route_direct + HubRouter.invoke; this module never calls model clients
 directly. Per-turn input goes through the security_engine hooks
-(quarantine_chunks, render_quarantined_context, enforce_context_rules,
-RiskLedger) before any worker invocation, and a hard abort is raised
-through SecurityAssessment when the cumulative risk score exceeds the
-configured threshold.
+(quarantine_chunks, render_quarantined_context) before any worker
+invocation; risk scoring and the cumulative-risk abort live in
+SecurityGate (services/security_gate.py).
 """
 
 import base64
@@ -34,7 +33,6 @@ import json
 import logging
 import re
 import uuid
-from collections import OrderedDict
 from datetime import datetime, timezone
 
 import db as _db
@@ -47,11 +45,7 @@ from services.hub_router import HubRouter
 from services.local_client import LocalVisionUnavailable
 from services import qwen_thinking
 from services.redact import redact
-from services.security_engine import (
-    quarantine_chunks, render_quarantined_context, enforce_context_rules,
-    validate_fact_for_storage, RiskLedger, RiskCategory, SecurityAssessment,
-    RISK_ABORT_THRESHOLD,
-)
+from services.security_engine import quarantine_chunks, render_quarantined_context
 
 log = logging.getLogger("altosybioagents.chat")
 
@@ -1041,8 +1035,8 @@ class ChatOrchestrator:
 
         # Layer 3 extraction: TurnLifecycle owns the budget check + user
         # message INSERT under the same db lock. Mutates ctx with budget,
-        # warn_pct, spent, budget_exceeded, user_msg_id; we keep local
-        # aliases to minimise downstream churn for the rest of send().
+        # warn_pct, spent, budget_exceeded; downstream code reads those
+        # fields off ctx directly.
         from services.turn_context import TurnContext
         ctx = TurnContext(
             conversation_id=conversation_id,
@@ -1055,8 +1049,6 @@ class ChatOrchestrator:
         budget = ctx.budget
         warn_pct = ctx.warn_pct
         spent = ctx.spent
-        user_msg_id = ctx.user_msg_id
-        now = ctx.started_at
 
         if budget_exceeded:
             return ChatResult(
@@ -1104,7 +1096,6 @@ class ChatOrchestrator:
                 on_token=on_token,
             )
 
-        # ── Improvement 4: ToolPermissionContext enforcement ─────────────────
         _allowed_tools = None
         if agent and agent.get("allowed_tools") and agent["allowed_tools"] != "[]":
             try:
@@ -1180,25 +1171,21 @@ class ChatOrchestrator:
             agent=agent,
         )
         mem = mem_result.mem
-        mem_suffix = mem_result.mem_suffix
         full_system = mem_result.full_system
 
         _emit_event("memory_recalled", self._memory_recall.memory_recalled_event(mem))
         self._memory_recall.maybe_summarize(conversation_id)
 
         # Layer 3 extraction: TurnRouter owns the agent.model_preference
-        # override + delegation to TaskRouter.classify(). The five fields
-        # downstream code uses (route_model, route_reason, complexity,
-        # route_confidence, route_needs_context) come back as one
-        # RouteOutcome and are unpacked into locals to keep the rest of
-        # send() touching as little as possible.
+        # override + delegation to TaskRouter.classify(). The three fields
+        # downstream code actually uses (route_model, route_reason,
+        # complexity) come back on RouteOutcome; confidence/needs_context
+        # are read off route_outcome where needed.
         ctx.agent = agent
         route_outcome = self._turn_router.decide(ctx, messages, mem)
         route_model = route_outcome.model
         route_reason = route_outcome.reasoning
         complexity = route_outcome.complexity
-        route_confidence = route_outcome.confidence
-        route_needs_context = route_outcome.needs_context
         self._turn_router.emit_decision(ctx, route_outcome)
 
         if _detect_compound(user_message):
@@ -1216,7 +1203,6 @@ class ChatOrchestrator:
             allowed_tools=_allowed_tools, agent=agent,
         )
         mem = mem_result.mem
-        mem_suffix = mem_result.mem_suffix
         full_system = mem_result.full_system
 
         # ── Phase 1: Build routing decision through the HubRouter ────────────

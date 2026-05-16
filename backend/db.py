@@ -963,12 +963,6 @@ def execute(sql: str, params: tuple = ()) -> None:
         get_db().execute(sql, params)
 
 
-def execute_returning(sql: str, params: tuple = ()) -> list[sqlite3.Row]:
-    """Execute and return all rows atomically (lock held for the full duration)."""
-    with _lock:
-        return get_db().execute(sql, params).fetchall()
-
-
 def executemany(sql: str, params_seq) -> None:
     """Execute many statements, thread-safely. Auto-commits."""
     with _lock:
