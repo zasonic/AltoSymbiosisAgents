@@ -47,15 +47,12 @@ Defense 6 — CaMeL: Privileged-LLM / Quarantined-LLM split (arXiv 2503.18813)
 """
 
 import hashlib
-import json
 import logging
 import re
 import time
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Optional
 
 log = logging.getLogger("altosybioagents.security")
 
@@ -413,27 +410,6 @@ def validate_fact_for_storage(
     )
 
     return True, "", attestation
-
-
-def prune_expired_facts(facts: list[dict]) -> list[dict]:
-    """Remove facts whose TTL has expired."""
-    now = datetime.now(timezone.utc)
-    kept = []
-    pruned = 0
-    for fact in facts:
-        ttl_str = fact.get("ttl_expires", "")
-        if ttl_str:
-            try:
-                expires = datetime.fromisoformat(ttl_str)
-                if expires < now:
-                    pruned += 1
-                    continue
-            except (ValueError, TypeError):
-                pass
-        kept.append(fact)
-    if pruned:
-        log.info("Memory firewall: pruned %d expired facts", pruned)
-    return kept
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

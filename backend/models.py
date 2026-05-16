@@ -6,7 +6,6 @@ typed objects. Only api.py converts to dicts at the JS boundary.
 
 Original stage 5 additions (UNCHANGED):
   - RouteDecision, ChatResult, TokenUsage, StreamEvent (Improvement 1)
-  - PermissionDenial, ToolPermissionContext (Improvement 4)
   - HistoryEvent, SessionHistory (Improvement 5)
   - ExecutionTarget (Improvement 6)
 
@@ -107,32 +106,6 @@ class StreamEvent:
 
     def to_dict(self) -> dict[str, Any]:
         return {"type": self.event_type, "conversation_id": self.conversation_id, **self.data}
-
-
-# ── Improvement 4: Tool permission context (UNCHANGED) ────────────────────────
-
-@dataclass(frozen=True)
-class PermissionDenial:
-    tool_name: str
-    reason: str
-
-
-@dataclass(frozen=True)
-class ToolPermissionContext:
-    deny_names: frozenset[str] = field(default_factory=frozenset)
-    deny_prefixes: tuple[str, ...] = ()
-
-    @classmethod
-    def from_iterables(cls, deny_names: list[str] | None = None,
-                       deny_prefixes: list[str] | None = None) -> "ToolPermissionContext":
-        return cls(
-            deny_names=frozenset(n.lower() for n in (deny_names or [])),
-            deny_prefixes=tuple(p.lower() for p in (deny_prefixes or [])),
-        )
-
-    def blocks(self, name: str) -> bool:
-        lowered = name.lower()
-        return lowered in self.deny_names or any(lowered.startswith(p) for p in self.deny_prefixes)
 
 
 # ── Improvement 5: Session history / transcript (UNCHANGED) ──────────────────
