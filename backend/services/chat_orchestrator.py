@@ -193,13 +193,19 @@ def _log_router_event(
 
 class ChatOrchestrator:
     def __init__(self, claude_client, local_client, router, memory, settings,
-                 hub_router: HubRouter | None = None, mcp_registry=None):
+                 hub_router: HubRouter | None = None, mcp_registry=None,
+                 audit_log=None):
         self.claude = claude_client
         self.local = local_client
         self.router = router
         self.memory = memory
         self._settings = settings
         self._mcp_registry = mcp_registry
+        # QLPT Stage 1 shadow mode: optional AuditLog handle so the
+        # EscalationLadder can persist paired (proxy, self) score
+        # records when ``escalation_log_margin_proxy_scores`` is True.
+        # Defaults to None so existing test construction is unchanged.
+        self._audit_log = audit_log
         self._governance = GovernanceEngine(settings)
         # Layer 3 extraction: memory recall + system-prompt assembly. The
         # RAG-trim path used to duplicate the assembly logic; now both the
@@ -239,8 +245,13 @@ class ChatOrchestrator:
             )
         self.hub_router = hub_router
         # Now that hub_router is wired, finish building EscalationLadder.
+        # QLPT Stage 1: settings + audit_log are threaded in so the
+        # ladder can read the margin-proxy feature flag, the override
+        # params, and persist paired shadow-mode score records when the
+        # operator opts into ``escalation_log_margin_proxy_scores``.
         self._escalation_ladder = self._EscalationLadder(
-            self.hub_router, self._local_client_ref,
+            self.hub_router, self._local_client_ref, self._settings,
+            audit_log=self._audit_log,
         )
         # WorkerDispatch wraps RoutingDecision construction + hub_router.invoke
         # so the orchestrator stops re-implementing the same shell at every
@@ -1683,6 +1694,10 @@ class ChatOrchestrator:
                 tokens_out = worker_result.output_tokens
                 if worker_result.had_error:
                     had_error = True
+                # QLPT Stage 1: hand the worker's per-token logprobs to
+                # the escalation ladder so it can score with margin_proxy
+                # in place of the self-score LLM call when enabled.
+                ctx.worker_logprobs = worker_result.logprobs
 
         # ── Post-assembly alignment check (informational) ───────────────────
         # When an agent was involved, ask the local model whether the worker's

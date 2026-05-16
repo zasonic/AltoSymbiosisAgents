@@ -603,6 +603,12 @@ class WorkerResult:
     input_tokens:  int = 0
     output_tokens: int = 0
     had_error:     bool = False
+    # QLPT Stage 1: per-token logprobs from a local generation, when the
+    # backend surfaces them. Tuple (not list) for frozen-dataclass safety.
+    # None means the backend did not return logprobs (Claude rescue,
+    # Ollama < 0.12.11, qwen_thinking path, stream fallback, etc.) — the
+    # escalation ladder treats None as "no signal, use self-score".
+    logprobs:      tuple[float, ...] | None = None
 
 
 # Phase 6: Hackett et al. (ACL 2025) Reader/Actor split. The Reader produces

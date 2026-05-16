@@ -25,6 +25,7 @@ import logging
 from dataclasses import dataclass
 
 from models import RoutingDecision
+from services import margin_proxy
 from services.turn_context import TurnContext
 
 log = logging.getLogger("altosybioagents.escalation_ladder")
@@ -64,9 +65,30 @@ class EscalationOutcome:
 class EscalationLadder:
     """Owns the local-fail → claude-rescue control flow."""
 
-    def __init__(self, hub_router, local_client):
+    def __init__(self, hub_router, local_client, settings=None, audit_log=None):
         self._hub = hub_router
         self._local = local_client
+        # QLPT Stage 1: settings is optional so existing test construction
+        # ``EscalationLadder(hub, local)`` keeps working. When None, the
+        # margin-proxy flag is treated as False and the ladder behaves
+        # exactly as it did pre-Stage-1.
+        self._settings = settings
+        # QLPT Stage 1 shadow mode: when ``audit_log`` is wired AND the
+        # ``escalation_log_margin_proxy_scores`` flag is True, every
+        # qualifying local turn writes a paired (proxy_score, self_score)
+        # record so Stage 2 analysis can correlate the two without a
+        # rerun. Optional to preserve existing test construction.
+        self._audit_log = audit_log
+        # Per-call scratchpad: records which scorer produced the latest
+        # _quality_score result so maybe_escalate can label the escalation
+        # reason for auditability. Reset on every _quality_score call.
+        self._last_score_path: str = "self-score"
+        # Shadow-mode scratchpad: populated by _quality_score when shadow
+        # logging is on so maybe_escalate can write a single audit record
+        # per qualifying turn. Either may be None when its branch did
+        # not run (or returned None).
+        self._last_proxy_score: float | None = None
+        self._last_self_score: float | None = None
 
     def maybe_escalate(
         self,
@@ -114,13 +136,43 @@ class EscalationLadder:
                 reason="local response empty; escalated",
             )
         else:
-            score = self._quality_score(ctx.user_message, response_text)
+            score = self._quality_score(
+                ctx.user_message, response_text,
+                logprobs=ctx.worker_logprobs,
+            )
             if score is not None and score < QUALITY_ESCALATION_THRESHOLD:
                 log.info("Local response scored %s — escalating to Claude", score)
+                # QLPT Stage 1: label which scorer produced the score so
+                # offline analysis can split escalation rates by path
+                # without having to re-derive them from telemetry. Keep
+                # the bare reason string for the self-score path so the
+                # existing test_escalation_ladder.py assertions on the
+                # exact string keep passing unmodified.
+                if self._last_score_path == "margin proxy":
+                    reason = (
+                        "local response failed quality gate (margin proxy); "
+                        "escalated"
+                    )
+                else:
+                    reason = "local response failed quality gate; escalated"
                 self._escalate(
                     outcome, decision, full_system, messages, target, ctx.on_token,
-                    reason="local response failed quality gate; escalated",
+                    reason=reason,
                 )
+
+            # QLPT Stage 1 shadow mode: write a paired (proxy, self) audit
+            # record whenever the operator opted into observability AND
+            # the worker produced logprobs. _quality_score above forced
+            # both LLM-side scores to run when the flag is on, so the
+            # scratchpad fields are populated.
+            if (
+                self._settings is not None
+                and bool(self._settings.get(
+                    "escalation_log_margin_proxy_scores", False,
+                ))
+                and ctx.worker_logprobs
+            ):
+                self._record_shadow(ctx, escalated=outcome.escalated)
 
         # Bug 4: response_empty must reflect the POST-escalation text, not
         # the pre-escalation value, so router_log doesn't claim the turn
@@ -193,11 +245,106 @@ class EscalationLadder:
         outcome.escalated = True
         outcome.escalation_reason = reason
 
-    def _quality_score(self, user_message: str, response_text: str):
-        """Self-rated local quality score, or None if unparseable.
+    def _quality_score(
+        self,
+        user_message: str,
+        response_text: str,
+        logprobs: tuple[float, ...] | None = None,
+    ):
+        """Quality score on the same 0..10 scale, or None if unscorable.
+
+        QLPT Stage 1 decision tree:
+          1. If ``escalation_use_margin_proxy`` is True AND the worker
+             produced logprobs, score with services.margin_proxy. The
+             margin-proxy path is pure and ~free (no extra LLM call).
+          2. Otherwise, run the legacy self-score path: a second local
+             LLM call that asks the model to rate its own answer. Stays
+             on local-first to keep the gate cheap; Claude is the
+             rescue, not the judge.
+
+        Shadow mode: when ``escalation_log_margin_proxy_scores`` is True
+        AND logprobs are present, BOTH paths run regardless of
+        ``escalation_use_margin_proxy`` so maybe_escalate can persist a
+        paired (proxy, self-score) record. The flag is observability
+        only — which score *drives* the escalation decision is still
+        controlled by ``escalation_use_margin_proxy`` alone.
+
+        Returns the driving score, or None on any error so the caller
+        skips escalation (graceful degradation).
+        """
+        # Reset all per-call scratchpad state so values from the previous
+        # turn can never leak into the escalation reason or the shadow
+        # audit record.
+        self._last_score_path = "self-score"
+        self._last_proxy_score = None
+        self._last_self_score = None
+
+        proxy_enabled = (
+            self._settings is not None
+            and bool(self._settings.get("escalation_use_margin_proxy", False))
+            and bool(logprobs)
+        )
+        shadow_logging = (
+            self._settings is not None
+            and bool(self._settings.get("escalation_log_margin_proxy_scores", False))
+            and bool(logprobs)
+        )
+
+        if proxy_enabled or shadow_logging:
+            self._last_proxy_score = self._compute_proxy_score(logprobs)
+            if proxy_enabled and self._last_proxy_score is not None:
+                self._last_score_path = "margin proxy"
+                if shadow_logging:
+                    # Existing raw-array log line stays for offline
+                    # aggregation experiments (geometric mean, etc.).
+                    log.info(
+                        "margin_proxy score=%.3f logprobs_len=%d raw=%s",
+                        self._last_proxy_score, len(logprobs), list(logprobs),
+                    )
+
+        # Self-score runs when:
+        #   - the proxy isn't driving (flag off, or proxy returned None
+        #     and we need the legacy fallback to keep the gate firing), OR
+        #   - shadow logging is on (paired data collection — second LLM
+        #     round-trip is the cost of correlation).
+        needs_self = (self._last_score_path != "margin proxy") or shadow_logging
+        if needs_self:
+            self._last_self_score = self._compute_self_score(
+                user_message, response_text,
+            )
+
+        if self._last_score_path == "margin proxy":
+            return self._last_proxy_score
+        return self._last_self_score
+
+    def _compute_proxy_score(
+        self, logprobs: tuple[float, ...] | None,
+    ) -> float | None:
+        """Run margin_proxy.score_from_logprobs with settings overrides.
+
+        Returns None on any failure so the caller can decide whether to
+        fall back or simply omit the proxy half of the shadow record.
+        """
+        if not logprobs or self._settings is None:
+            return None
+        params_override = self._settings.get(
+            "escalation_margin_proxy_params", None,
+        )
+        try:
+            return margin_proxy.score_from_logprobs(
+                list(logprobs), params_override=params_override,
+            )
+        except Exception as exc:
+            log.debug("margin_proxy.score_from_logprobs raised: %s", exc)
+            return None
+
+    def _compute_self_score(
+        self, user_message: str, response_text: str,
+    ) -> float | None:
+        """Legacy self-score LLM call. Local-only, ~100 tokens out.
 
         We stay on local-first to keep the gate cheap; Claude is the
-        rescue, not the judge.
+        rescue, not the judge. Returns None on any parse failure.
         """
         try:
             from services.task_artifacts import local_first_call
@@ -227,3 +374,43 @@ class EscalationLadder:
             return float(quality.get("score", 10))
         except (TypeError, ValueError):
             return 10.0
+
+    def _record_shadow(self, ctx: TurnContext, *, escalated: bool) -> None:
+        """Persist a paired (proxy, self) score record for QLPT analysis.
+
+        Only fires when the audit_log handle is wired AND
+        ``escalation_log_margin_proxy_scores`` is True AND the worker
+        produced logprobs. Best-effort: any exception in the audit sink
+        is swallowed so a flaky disk can't regress the gate.
+        """
+        if self._audit_log is None:
+            return
+        threshold = QUALITY_ESCALATION_THRESHOLD
+        proxy = self._last_proxy_score
+        self_s = self._last_self_score
+        # Spec uses underscore tokens for the path label in the audit
+        # record; the reason string keeps the human-readable "margin
+        # proxy" for backwards compatibility with existing assertions.
+        if not escalated:
+            path_token = "none"
+        elif self._last_score_path == "margin proxy":
+            path_token = "margin_proxy"
+        else:
+            path_token = "self_score"
+        try:
+            self._audit_log.append(
+                "margin_proxy_shadow",
+                conversation_id=ctx.conversation_id,
+                turn_id=ctx.turn_id or None,
+                proxy_score=proxy,
+                self_score=self_s,
+                proxy_threshold_crossed=(
+                    proxy is not None and proxy < threshold
+                ),
+                self_threshold_crossed=(
+                    self_s is not None and self_s < threshold
+                ),
+                which_path_drove_escalation=path_token,
+            )
+        except Exception as exc:
+            log.debug("margin_proxy shadow audit write failed: %s", exc)

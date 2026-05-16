@@ -185,6 +185,15 @@ class API:
             lambda: MCPRegistry(paths.mcp_servers_dir(), self._settings),
         )
 
+        # Phase 4: append-only audit log + human-in-loop lifecycle gate.
+        # QLPT Stage 1: built BEFORE chat_orchestrator so the
+        # EscalationLadder can write paired margin-proxy / self-score
+        # shadow records into the same JSONL sink.
+        self._audit_log = self._safe_init(
+            "audit_log",
+            lambda: AuditLog(paths.user_dir() / "lifecycle_audit.jsonl"),
+        )
+
         self._chat = self._safe_init(
             "chat_orchestrator",
             lambda: ChatOrchestrator(
@@ -194,14 +203,10 @@ class API:
                 memory=self._memory,
                 settings=self._settings,
                 mcp_registry=self._mcp_registry,
+                audit_log=self._audit_log,
             ),
         )
 
-        # Phase 4: append-only audit log + human-in-loop lifecycle gate.
-        self._audit_log = self._safe_init(
-            "audit_log",
-            lambda: AuditLog(paths.user_dir() / "lifecycle_audit.jsonl"),
-        )
         self._lifecycle = self._safe_init(
             "lifecycle",
             lambda: LifecycleManager(self._audit_log, emit=self._emit),

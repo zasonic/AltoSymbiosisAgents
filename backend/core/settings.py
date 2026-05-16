@@ -201,6 +201,24 @@ SETTINGS_DEFAULTS: dict[str, tuple] = {
     # Reader proposed. Default False so existing behavior is preserved.
     "reader_actor_split_enabled":    (bool,  False),
 
+    # QLPT Stage 1: logprob-derived margin-proxy quality scorer.
+    # When True, EscalationLadder uses services.margin_proxy in place of
+    # the self-score LLM call — but only when the worker actually
+    # produced per-token logprobs. Falls back to the self-score path
+    # otherwise (Claude rescue, Ollama < 0.12.11, qwen_thinking path).
+    # Default off so existing users see no behavior change.
+    #   - escalation_margin_proxy_params: optional dict overriding
+    #     services.margin_proxy.SCORING_PARAMS keys (clamp_low,
+    #     threshold_uncertain, penalty_weight). None means use the
+    #     module defaults.
+    #   - escalation_log_margin_proxy_scores: when True, log the score
+    #     and the raw per-token logprob array each time the margin path
+    #     runs, so the data can be re-aggregated offline (geometric
+    #     mean, min-token, etc.) without re-running inference.
+    "escalation_use_margin_proxy":         (bool,                False),
+    "escalation_margin_proxy_params":      ((dict, type(None)),  None),
+    "escalation_log_margin_proxy_scores":  (bool,                False),
+
     # Phase 12: CaMeL (Defeating Prompt Injections by Design — DeepMind/ETH,
     # arXiv 2503.18813). Privileged-LLM / Quarantined-LLM split with
     # capability-tagged plan execution. Only fires when the turn has

@@ -25,6 +25,15 @@ log = logging.getLogger("altosybioagents.local")
 
 _FALLBACK = "[Local model unavailable — no response]"
 
+# QLPT Stage 1: Ollama added native logprobs to /api/chat in v0.12.11
+# (Nov 2025). The /v1/chat/completions compatibility layer still drops
+# the field — see ollama/ollama#16117. When the unified path needs
+# logprobs for the Ollama backend we hit native /api/chat with
+# ``"logprobs": true, "top_logprobs": 1``; LM Studio / bundled stay on
+# the OpenAI-compatible path because LM Studio's compat layer surfaces
+# logprobs correctly.
+OLLAMA_MIN_LOGPROBS_VERSION = "0.12.11"
+
 
 class LocalVisionUnavailable(RuntimeError):
     """Raised when the active local model can't see images.
@@ -51,6 +60,11 @@ class LocalClient(LLMClient):
         # at the persisted port (read from paths.bundled_server_port_file)
         # so that a sidecar restart doesn't lose the connection.
         self._bundled_server: object | None = None
+        # QLPT Stage 1: Ollama logprobs support is gated by server version.
+        # Probe /api/version once per session and cache the result so every
+        # unified-path call doesn't pay the round trip. None = not probed yet.
+        self._ollama_logprobs_ok: bool | None = None
+        self._ollama_logprobs_warned: bool = False
 
     def attach_bundled_server(self, bundled_server: object) -> None:
         """Late-bind the BundledServer handle.
@@ -460,17 +474,273 @@ class LocalClient(LLMClient):
                 on_token(full)
         return full, None
 
+    # ── Logprob helpers (QLPT Stage 1) ──────────────────────────────────────
+
+    @staticmethod
+    def _parse_lm_studio_logprobs(body: dict) -> list[float] | None:
+        """Extract per-token logprobs from an LM Studio (OpenAI-compat) body.
+
+        Returns None when the field is absent or malformed. The OpenAI
+        shape is ``choices[0].logprobs.content[*].logprob``.
+        """
+        try:
+            content = body["choices"][0]["logprobs"]["content"]
+        except (KeyError, IndexError, TypeError):
+            return None
+        if not isinstance(content, list) or not content:
+            return None
+        out: list[float] = []
+        for item in content:
+            lp = item.get("logprob") if isinstance(item, dict) else None
+            if isinstance(lp, bool) or not isinstance(lp, (int, float)):
+                return None
+            out.append(float(lp))
+        return out or None
+
+    @staticmethod
+    def _parse_ollama_logprobs(body: dict) -> list[float] | None:
+        """Extract per-token logprobs from an Ollama native /api/chat body.
+
+        The native shape (since v0.12.11) is a top-level ``logprobs`` list
+        of ``{"token": str, "logprob": float, ...}`` entries. Returns None
+        when absent or malformed.
+        """
+        entries = body.get("logprobs") if isinstance(body, dict) else None
+        if not isinstance(entries, list) or not entries:
+            return None
+        out: list[float] = []
+        for item in entries:
+            lp = item.get("logprob") if isinstance(item, dict) else None
+            if isinstance(lp, bool) or not isinstance(lp, (int, float)):
+                return None
+            out.append(float(lp))
+        return out or None
+
+    @staticmethod
+    def _version_at_least(actual: str, minimum: str) -> bool:
+        """Compare dotted version strings as integer tuples.
+
+        Falls back to False on any parse failure. Pre-release / build
+        suffixes (e.g. "0.12.11-rc1") are stripped at the first non-digit
+        component so a forward-compat release still satisfies the gate.
+        """
+        def parse(v: str) -> tuple[int, ...]:
+            parts: list[int] = []
+            for chunk in str(v).split("."):
+                digits = ""
+                for ch in chunk:
+                    if ch.isdigit():
+                        digits += ch
+                    else:
+                        break
+                if not digits:
+                    return tuple(parts)
+                parts.append(int(digits))
+            return tuple(parts)
+
+        try:
+            return parse(actual) >= parse(minimum)
+        except Exception:
+            return False
+
+    def _ollama_supports_logprobs(self) -> bool:
+        """Probe Ollama /api/version once and cache the result.
+
+        Returns False on probe failure or when the running Ollama is
+        older than OLLAMA_MIN_LOGPROBS_VERSION. Emits a one-time WARNING
+        on the first negative result so users notice why margin-proxy is
+        silently falling back to self-score.
+        """
+        cached = self._ollama_logprobs_ok
+        if cached is not None:
+            return cached
+        ok = False
+        try:
+            url = self._url("ollama")
+            r = requests.get(url + "/api/version", timeout=2)
+            if r.status_code == 200:
+                version = (r.json() or {}).get("version", "") or ""
+                ok = self._version_at_least(version, OLLAMA_MIN_LOGPROBS_VERSION)
+        except Exception as exc:
+            log.debug("Ollama version probe failed: %s", exc)
+            ok = False
+        self._ollama_logprobs_ok = ok
+        if not ok and not self._ollama_logprobs_warned:
+            log.warning(
+                "Ollama does not support native logprobs (need >= %s). "
+                "Margin-proxy quality scorer will fall back to self-score "
+                "for the Ollama backend in this session.",
+                OLLAMA_MIN_LOGPROBS_VERSION,
+            )
+            self._ollama_logprobs_warned = True
+        return ok
+
     # ── LLMClient interface ─────────────────────────────────────────────────
 
     def chat_unified(self, system, messages, max_tokens=4096):
-        text = self.chat_multi_turn(system, messages, max_tokens=max_tokens)
-        return {"text": text or "", "input_tokens": 0, "output_tokens": 0}
+        """Non-streaming unified chat; returns dict with optional logprobs.
+
+        Backend-aware: LM Studio / bundled use the OpenAI-compat endpoint
+        with ``logprobs=True, top_logprobs=1``. Ollama uses native
+        ``/api/chat`` with the same options, but only when the server is
+        new enough (see _ollama_supports_logprobs). On any failure the
+        method falls back to plain ``chat_multi_turn`` and returns
+        ``logprobs=None`` so the escalation ladder can drop to self-score.
+        """
+        b = self._backend()
+        model = self._settings.get("default_local_model", "") or ""
+        url = self._url(b)
+        msgs: list[dict] = []
+        if system:
+            msgs.append({"role": "system", "content": system})
+        msgs.extend(messages)
+
+        if b == "ollama":
+            if not self._ollama_supports_logprobs():
+                text = self.chat_multi_turn(system, messages, max_tokens=max_tokens)
+                return {
+                    "text": text or "", "input_tokens": 0,
+                    "output_tokens": 0, "logprobs": None,
+                }
+            payload = {
+                "model": model, "messages": msgs,
+                "stream": False,
+                "logprobs": True, "top_logprobs": 1,
+                "options": {"num_predict": max_tokens},
+            }
+            try:
+                r = requests.post(url + "/api/chat", json=payload, timeout=120)
+                r.raise_for_status()
+                body = r.json()
+                text = body.get("message", {}).get("content", _FALLBACK)
+                return {
+                    "text": text or "", "input_tokens": 0, "output_tokens": 0,
+                    "logprobs": self._parse_ollama_logprobs(body),
+                }
+            except Exception as exc:
+                log.warning("LocalClient.chat_unified (ollama+logprobs) failed: %s", exc)
+                return {
+                    "text": _FALLBACK, "input_tokens": 0,
+                    "output_tokens": 0, "logprobs": None,
+                }
+
+        # OpenAI-compatible (LM Studio, bundled llama-server).
+        payload = {
+            "model": model, "messages": msgs,
+            "max_tokens": max_tokens, "stream": False,
+            "logprobs": True, "top_logprobs": 1,
+        }
+        try:
+            r = requests.post(url + "/v1/chat/completions", json=payload, timeout=120)
+            r.raise_for_status()
+            body = r.json()
+            text = body["choices"][0]["message"]["content"]
+            return {
+                "text": text or "", "input_tokens": 0, "output_tokens": 0,
+                "logprobs": self._parse_lm_studio_logprobs(body),
+            }
+        except Exception as exc:
+            log.warning("LocalClient.chat_unified (lm_studio+logprobs) failed: %s", exc)
+            return {
+                "text": _FALLBACK, "input_tokens": 0,
+                "output_tokens": 0, "logprobs": None,
+            }
 
     def stream_unified(self, system, messages, on_token, max_tokens=4096):
-        text, _usage = self.stream_multi_turn(
-            system, messages, on_token, max_tokens=max_tokens,
-        )
-        return {"text": text or "", "input_tokens": 0, "output_tokens": 0}
+        """Streaming unified chat; accumulates per-chunk logprobs.
+
+        Same backend-aware policy as chat_unified. On stream failure we
+        fall back to non-streaming via stream_multi_turn and return
+        ``logprobs=None`` because we cannot reliably reconstruct them
+        from a half-broken stream.
+        """
+        b = self._backend()
+        model = self._settings.get("default_local_model", "") or ""
+        url = self._url(b)
+        msgs: list[dict] = []
+        if system:
+            msgs.append({"role": "system", "content": system})
+        msgs.extend(messages)
+
+        ollama_native = (b == "ollama") and self._ollama_supports_logprobs()
+        if b == "ollama" and not ollama_native:
+            text, _usage = self.stream_multi_turn(
+                system, messages, on_token, max_tokens=max_tokens,
+            )
+            return {
+                "text": text or "", "input_tokens": 0,
+                "output_tokens": 0, "logprobs": None,
+            }
+
+        if ollama_native:
+            endpoint = "/api/chat"
+            payload = {
+                "model": model, "messages": msgs,
+                "stream": True,
+                "logprobs": True, "top_logprobs": 1,
+                "options": {"num_predict": max_tokens},
+            }
+        else:
+            endpoint = "/v1/chat/completions"
+            payload = {
+                "model": model, "messages": msgs,
+                "max_tokens": max_tokens, "stream": True,
+                "logprobs": True, "top_logprobs": 1,
+            }
+
+        full = ""
+        logprobs: list[float] = []
+        try:
+            with requests.post(
+                url + endpoint, json=payload, stream=True, timeout=120,
+            ) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    raw = line.decode("utf-8")
+                    if raw.startswith("data: "):
+                        raw = raw[6:]
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(raw)
+                    except Exception:
+                        continue
+                    try:
+                        if ollama_native:
+                            text = chunk.get("message", {}).get("content", "")
+                            chunk_lp = self._parse_ollama_logprobs(chunk)
+                        else:
+                            choice = chunk["choices"][0]
+                            text = choice.get("delta", {}).get("content", "") or ""
+                            chunk_lp = self._parse_lm_studio_logprobs({
+                                "choices": [{"logprobs": choice.get("logprobs")}]
+                            })
+                        if text:
+                            on_token(text)
+                            full += text
+                        if chunk_lp:
+                            logprobs.extend(chunk_lp)
+                    except Exception:
+                        continue
+        except Exception as exc:
+            log.warning(
+                "LocalClient.stream_unified (%s+logprobs) failed: %s. Falling back.",
+                b, exc,
+            )
+            text, _usage = self.stream_multi_turn(
+                system, messages, on_token, max_tokens=max_tokens,
+            )
+            return {
+                "text": text or "", "input_tokens": 0,
+                "output_tokens": 0, "logprobs": None,
+            }
+
+        return {
+            "text": full, "input_tokens": 0, "output_tokens": 0,
+            "logprobs": logprobs if logprobs else None,
+        }
 
     def client_name(self) -> str:
         return self._settings.get("default_local_model", "local")
