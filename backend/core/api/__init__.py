@@ -824,6 +824,12 @@ class API:
     def chat_rename_conversation(self, conversation_id, title):
         return self._chat_api.chat_rename_conversation(conversation_id, title)
 
+    def chat_set_conversation_agent(self, conversation_id, agent_id=""):
+        return self._chat_api.chat_set_conversation_agent(conversation_id, agent_id)
+
+    def chat_set_conversation_roster(self, conversation_id, agent_ids):
+        return self._chat_api.chat_set_conversation_roster(conversation_id, agent_ids)
+
     def chat_delete_conversation(self, conversation_id):
         return self._chat_api.chat_delete_conversation(conversation_id)
 
@@ -893,6 +899,9 @@ class API:
 
     def team_delete(self, team_id):
         return self._agents_api.team_delete(team_id)
+
+    def team_save_adhoc(self, team_id, name, description=""):
+        return self._agents_api.team_save_adhoc(team_id, name, description)
 
     # Memory
     def save_memory(self, content, category="fact"):

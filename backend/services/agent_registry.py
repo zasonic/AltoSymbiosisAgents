@@ -791,11 +791,95 @@ def remove_team_member(team_id: str, agent_id: str) -> list[str]:
     return refresh_team_tom(team_id)
 
 
-def list_teams() -> list[dict]:
-    rows = _db.fetchall(
-        "SELECT * FROM agent_teams ORDER BY created_at DESC"
-    )
+def list_teams(include_adhoc: bool = False) -> list[dict]:
+    """List teams. Ad-hoc teams (created by per-conversation roster picks)
+    are hidden by default — the saved-team presets list in the picker should
+    only show user-named teams."""
+    if include_adhoc:
+        rows = _db.fetchall(
+            "SELECT * FROM agent_teams ORDER BY created_at DESC"
+        )
+    else:
+        rows = _db.fetchall(
+            "SELECT * FROM agent_teams WHERE COALESCE(is_adhoc, 0) = 0 "
+            "ORDER BY created_at DESC"
+        )
     return [dict(r) for r in rows]
+
+
+def find_or_create_adhoc_team(member_ids: list[str]) -> str:
+    """Return a team id whose membership is exactly ``member_ids``.
+
+    Reuses an existing ad-hoc team if its membership matches (order-insensitive
+    by agent id) so picking the same roster twice doesn't litter the DB.
+    Coordinator is picked deterministically: first member whose role is
+    'coordinator', otherwise the first in ``member_ids`` order.
+    """
+    if not member_ids:
+        raise ValueError("find_or_create_adhoc_team requires at least one member")
+
+    desired = frozenset(member_ids)
+
+    # Check existing ad-hoc teams for an exact membership match.
+    existing = _db.fetchall(
+        "SELECT t.id, GROUP_CONCAT(atm.agent_id) AS members "
+        "FROM agent_teams t "
+        "LEFT JOIN agent_team_members atm ON atm.team_id = t.id "
+        "WHERE COALESCE(t.is_adhoc, 0) = 1 "
+        "GROUP BY t.id"
+    )
+    for row in existing:
+        members = frozenset((row["members"] or "").split(",")) - {""}
+        if members == desired:
+            return row["id"]
+
+    # Pick coordinator deterministically.
+    coordinator_id = member_ids[0]
+    for mid in member_ids:
+        role_row = _db.fetchone("SELECT role FROM agents WHERE id = ?", (mid,))
+        if role_row and (role_row["role"] or "").lower() == "coordinator":
+            coordinator_id = mid
+            break
+
+    # Name for display in the conversation header if the user never saves.
+    name_rows = _db.fetchall(
+        "SELECT name FROM agents WHERE id IN ({})".format(
+            ",".join("?" for _ in member_ids)
+        ),
+        tuple(member_ids),
+    )
+    name = "Ad-hoc · " + " + ".join(r["name"] for r in name_rows[:3])
+    if len(name_rows) > 3:
+        name += f" +{len(name_rows) - 3}"
+
+    tid = str(uuid.uuid4())
+    _db.execute(
+        "INSERT INTO agent_teams (id, name, description, coordinator_id, "
+        "is_adhoc, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+        (tid, name, "Ad-hoc roster", coordinator_id, _now(), _now()),
+    )
+    for i, mid in enumerate(member_ids):
+        role = "coordinator" if mid == coordinator_id else "worker"
+        _db.execute(
+            "INSERT OR REPLACE INTO agent_team_members "
+            "(team_id, agent_id, role, sort_order) VALUES (?, ?, ?, ?)",
+            (tid, mid, role, i),
+        )
+    _db.commit()
+    refresh_team_tom(tid)
+    return tid
+
+
+def save_adhoc_team(team_id: str, name: str, description: str = "") -> dict:
+    """Promote an ad-hoc team to a saved preset. Renames it and clears the
+    is_adhoc flag so it appears in the team list."""
+    _db.execute(
+        "UPDATE agent_teams SET name = ?, description = ?, is_adhoc = 0, "
+        "updated_at = ? WHERE id = ?",
+        (name, description, _now(), team_id),
+    )
+    _db.commit()
+    return {"id": team_id, "name": name}
 
 
 def get_team_with_members(team_id: str) -> dict | None:

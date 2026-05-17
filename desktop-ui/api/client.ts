@@ -323,6 +323,17 @@ export const Chat = {
   stop: () => api.post<{ ok: true }>("/api/chat/stop"),
   newConversation: (agent_id = "", title = "New conversation") =>
     api.post<{ id: string }>("/api/chat/new_conversation", { agent_id, title }),
+  setConversationAgent: (conversation_id: string, agent_id = "") =>
+    api.post<{ ok: true }>("/api/chat/set_conversation_agent", {
+      conversation_id,
+      agent_id,
+    }),
+  setConversationRoster: (conversation_id: string, agent_ids: string[]) =>
+    api.post<{
+      ok: true;
+      agent_id: string | null;
+      team_id: string | null;
+    }>("/api/chat/set_conversation_roster", { conversation_id, agent_ids }),
   list: (limit = 30) => api.get<unknown[]>("/api/chat/conversations", { limit }),
   messages: (conversation_id: string, limit = 100) =>
     api.get<unknown[]>(`/api/chat/messages/${encodeURIComponent(conversation_id)}`, { limit }),
@@ -367,6 +378,47 @@ export const Agents = {
     api.post<unknown>(`/api/agents/delete/${encodeURIComponent(agent_id)}`),
   duplicate: (agent_id: string, new_name: string) =>
     api.post<unknown>("/api/agents/duplicate", { agent_id, new_name }),
+};
+
+export interface TeamRow {
+  id: string;
+  name: string;
+  description?: string;
+  coordinator_id?: string;
+  is_adhoc?: number | boolean;
+}
+
+export const Teams = {
+  list: () => api.get<TeamRow[]>("/api/agents/teams/all"),
+  get: (team_id: string) =>
+    api.get<unknown>(`/api/agents/teams/${encodeURIComponent(team_id)}`),
+  create: (name: string, description: string, coordinator_id: string) =>
+    api.post<{ id: string; name: string }>("/api/agents/teams/create", {
+      name,
+      description,
+      coordinator_id,
+    }),
+  addMember: (team_id: string, agent_id: string, role = "worker") =>
+    api.post<{ ok: boolean }>("/api/agents/teams/add_member", {
+      team_id,
+      agent_id,
+      role,
+    }),
+  removeMember: (team_id: string, agent_id: string) =>
+    api.post<{ ok: boolean }>("/api/agents/teams/remove_member", {
+      team_id,
+      agent_id,
+    }),
+  delete: (team_id: string) =>
+    api.post<{ ok: boolean }>(
+      `/api/agents/teams/delete/${encodeURIComponent(team_id)}`,
+    ),
+  saveAdhoc: (team_id: string, name: string, description = "") =>
+    api.post<{ id: string; name: string }>("/api/agents/teams/save_adhoc", {
+      team_id,
+      name,
+      description,
+    }),
 };
 
 export interface PendingWriteRow {

@@ -20,6 +20,7 @@ import {
   Models,
   PromptTemplates,
   Settings,
+  Teams,
   Voice,
   type Attachment,
   type ConversationExportFormat,
@@ -31,11 +32,14 @@ import { MessageBubble, type MessageRow } from "@/components/chat/MessageBubble"
 import { MessageRenderer } from "@/components/MessageRenderer";
 import { MessageErrorBoundary } from "@/components/MessageErrorBoundary";
 import { ModelSwitcher } from "@/components/ModelSwitcher";
+import { RosterPicker, type RosterPick } from "@/components/RosterPicker";
 import { useAppStore } from "@/stores/appStore";
 
 interface ConversationRow {
   id: string;
   title?: string;
+  agent_id?: string | null;
+  team_id?: string | null;
   updated_at?: string;
 }
 
@@ -105,6 +109,11 @@ export function ChatView() {
 
   const [conversations, setConversations] = useState<ConversationRow[]>([]);
   const [activeId, setActiveId] = useState<string>("");
+  // Roster picked for the next new conversation when none is active yet.
+  // Existing conversations read their binding from the conversation row.
+  const [pendingRoster, setPendingRoster] = useState<RosterPick>({
+    agentIds: [],
+  });
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [input, setInput] = useState<string>("");
   // PR 18: snippet dropdown. ``slashOpen`` is true whenever the input
@@ -318,7 +327,41 @@ export function ChatView() {
 
   const newConversation = async () => {
     try {
-      const { id } = await Chat.newConversation();
+      // Seed the conversation with the simplest binding: if exactly one
+      // agent is pending, pass it inline. Multi-agent / team pending picks
+      // go through set_conversation_roster after creation.
+      const seedAgentId =
+        pendingRoster.agentIds.length === 1 && !pendingRoster.teamId
+          ? pendingRoster.agentIds[0]
+          : "";
+      const { id } = await Chat.newConversation(seedAgentId);
+
+      const needsRoster =
+        pendingRoster.agentIds.length >= 2 || !!pendingRoster.teamId;
+      if (needsRoster) {
+        // teamId path is currently set by send-time roster apply; for a fresh
+        // conversation, replay the same set_conversation_roster call.
+        if (pendingRoster.teamId) {
+          // Apply the team via Chat.setConversationAgent (coordinator alone)
+          // would be wrong here — use roster instead. The backend treats a
+          // single-id roster as solo, but we want the team. So fetch the
+          // team's members and pass them.
+          try {
+            const team = (await Teams.get(pendingRoster.teamId)) as {
+              members?: { id: string }[];
+            };
+            const memberIds = (team?.members ?? []).map((m) => m.id);
+            if (memberIds.length >= 2) {
+              await Chat.setConversationRoster(id, memberIds);
+            }
+          } catch {
+            // best-effort: conversation still exists, just without the team
+          }
+        } else {
+          await Chat.setConversationRoster(id, pendingRoster.agentIds);
+        }
+      }
+
       setActiveId(id);
       const rows = (await Chat.list(50)) as ConversationRow[];
       setConversations(rows);
@@ -761,7 +804,8 @@ export function ChatView() {
     setSendPhase("chat");
     startChatStream(activeId);
     try {
-      await Chat.send(activeId, text);
+      const conv = conversations.find((c) => c.id === activeId);
+      await Chat.send(activeId, text, conv?.agent_id ?? "");
     } catch (err) {
       pushToast({
         kind: "error",
@@ -810,6 +854,65 @@ export function ChatView() {
     () => conversations.find((c) => c.id === activeId),
     [conversations, activeId],
   );
+
+  // What the RosterPicker displays. For an active conversation, read its
+  // stored binding (agent_id XOR team_id); otherwise show whatever roster the
+  // user lined up for the next new conversation.
+  const currentAgentId = activeId
+    ? (activeConversation?.agent_id ?? "")
+    : (pendingRoster.agentIds.length === 1 && !pendingRoster.teamId
+        ? pendingRoster.agentIds[0]
+        : "");
+  const currentTeamId = activeId
+    ? (activeConversation?.team_id ?? "")
+    : (pendingRoster.teamId ?? "");
+
+  const applyRoster = async (pick: RosterPick) => {
+    if (!activeId) {
+      // No conversation yet — stash the pick and apply on next new chat.
+      setPendingRoster(pick);
+      return;
+    }
+    try {
+      let result: { agent_id: string | null; team_id: string | null };
+      if (pick.teamId) {
+        // Picking a saved team preset: re-hydrate members and route through
+        // setConversationRoster so the backend reuses the right team id.
+        const team = (await Teams.get(pick.teamId)) as {
+          members?: { id: string }[];
+        };
+        const memberIds = (team?.members ?? []).map((m) => m.id);
+        if (memberIds.length === 0) {
+          throw new Error("Selected team has no members");
+        }
+        // Use the team's id directly via a roster of its members; the
+        // find_or_create reuses the team since membership matches.
+        const rsp = await Chat.setConversationRoster(activeId, memberIds);
+        // If the saved team had is_adhoc=0 but the roster matched an ad-hoc
+        // team, the response team_id may differ. Force the saved team id.
+        result = { agent_id: null, team_id: pick.teamId };
+        void rsp;
+      } else {
+        const rsp = await Chat.setConversationRoster(activeId, pick.agentIds);
+        result = { agent_id: rsp.agent_id, team_id: rsp.team_id };
+      }
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeId
+            ? { ...c, agent_id: result.agent_id, team_id: result.team_id }
+            : c,
+        ),
+      );
+    } catch (err) {
+      pushToast({
+        kind: "error",
+        text: err instanceof Error ? err.message : "Could not change roster",
+      });
+      // Roll back from server.
+      const rows = (await Chat.list(50)) as ConversationRow[];
+      setConversations(rows);
+    }
+  };
 
   // Unified item stream so the virtualized list can render messages and the
   // streaming preview as a single scrollable surface.
@@ -953,6 +1056,12 @@ export function ChatView() {
             <div className="text-sm font-medium text-ink truncate flex-1 min-w-0">
               {activeConversation?.title || "Untitled"}
             </div>
+            <RosterPicker
+              agentId={currentAgentId}
+              teamId={currentTeamId}
+              onApply={applyRoster}
+              disabled={sendPhase !== "idle"}
+            />
             <ModelSwitcher />
             <ExportMenu
               conversationId={activeId}

@@ -38,6 +38,16 @@ class ChatRenameIn(BaseModel):
     title: str
 
 
+class ChatSetAgentIn(BaseModel):
+    conversation_id: str
+    agent_id: str = ""
+
+
+class ChatSetRosterIn(BaseModel):
+    conversation_id: str
+    agent_ids: list[str] = Field(default_factory=list)
+
+
 class ChatBranchIn(BaseModel):
     conversation_id: str
     from_message_id: str
@@ -96,6 +106,20 @@ async def get_messages(
 @router.post("/rename_conversation")
 async def rename(body: ChatRenameIn, request: Request) -> dict:
     return get_api(request).chat_rename_conversation(body.conversation_id, body.title)
+
+
+@router.post("/set_conversation_agent")
+async def set_conversation_agent(body: ChatSetAgentIn, request: Request) -> dict:
+    return get_api(request).chat_set_conversation_agent(
+        body.conversation_id, body.agent_id,
+    )
+
+
+@router.post("/set_conversation_roster")
+async def set_conversation_roster(body: ChatSetRosterIn, request: Request) -> dict:
+    return get_api(request).chat_set_conversation_roster(
+        body.conversation_id, body.agent_ids,
+    )
 
 
 @router.post("/delete_conversation/{conversation_id}")

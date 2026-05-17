@@ -55,6 +55,12 @@ class TeamMemberIn(BaseModel):
     role: str = "worker"
 
 
+class TeamSaveAdhocIn(BaseModel):
+    team_id: str
+    name: str
+    description: str = ""
+
+
 @router.get("")
 async def list_agents(request: Request) -> list:
     return get_api(request).agent_list()
@@ -154,3 +160,8 @@ async def team_remove_member(body: TeamMemberIn, request: Request) -> dict:
 @router.post("/teams/delete/{team_id}")
 async def team_delete(team_id: str, request: Request) -> dict:
     return get_api(request).team_delete(team_id)
+
+
+@router.post("/teams/save_adhoc")
+async def team_save_adhoc(body: TeamSaveAdhocIn, request: Request) -> dict:
+    return get_api(request).team_save_adhoc(body.team_id, body.name, body.description)

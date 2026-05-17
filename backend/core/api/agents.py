@@ -125,3 +125,9 @@ class AgentsAPI(BaseAPI):
         from services.agent_registry import delete_team
         delete_team(team_id)
         return {"ok": True}
+
+    def team_save_adhoc(self, team_id: str, name: str, description: str = "") -> dict:
+        """Promote an ad-hoc team (auto-created from a roster pick) to a saved
+        preset by clearing the is_adhoc flag and renaming it."""
+        from services.agent_registry import save_adhoc_team
+        return save_adhoc_team(team_id, name, description)

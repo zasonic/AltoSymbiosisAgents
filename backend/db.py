@@ -923,6 +923,21 @@ _MIGRATIONS = [
     ("idx_token_usage_conversation.1.0", [
         "CREATE INDEX IF NOT EXISTS idx_token_usage_conversation ON token_usage(conversation_id)",
     ]),
+
+    # ── Phase 2 (multi-agent roster): per-conversation team binding ──────────
+    # team_id on conversations decouples team selection from the coordinator
+    # lookup (which could only return one team per coordinator). When set, the
+    # orchestrator dispatches to that team's pipeline; otherwise the legacy
+    # agent_id → coordinator path still works for solo agent conversations.
+    # is_adhoc on agent_teams hides one-off rosters from the saved-team
+    # presets list — when the user clicks "Save as team", the flag is cleared
+    # and the team becomes a named preset.
+    ("multi_agent_roster.1.0", [
+        "ALTER TABLE conversations ADD COLUMN team_id TEXT",
+        "ALTER TABLE agent_teams ADD COLUMN is_adhoc INTEGER NOT NULL DEFAULT 0",
+        "CREATE INDEX IF NOT EXISTS idx_conversations_team_id ON conversations(team_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_teams_is_adhoc ON agent_teams(is_adhoc)",
+    ]),
 ]
 
 

@@ -277,7 +277,7 @@ class ChatOrchestrator:
 
     def list_conversations(self, limit: int = 30) -> list[dict]:
         rows = _db.fetchall(
-            "SELECT id, title, agent_id, created_at, updated_at "
+            "SELECT id, title, agent_id, team_id, created_at, updated_at "
             "FROM conversations ORDER BY updated_at DESC LIMIT ?",
             (limit,),
         )
@@ -290,6 +290,67 @@ class ChatOrchestrator:
             (title, now, conversation_id),
         )
         _db.commit()
+
+    def update_conversation_agent(
+        self, conversation_id: str, agent_id: str | None,
+    ) -> None:
+        """Persist the agent picked for an existing conversation.
+
+        Pass an empty string (or None) to clear the binding so subsequent
+        turns fall back to smart routing with the default system prompt.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        _db.execute(
+            "UPDATE conversations SET agent_id = ?, updated_at = ? WHERE id = ?",
+            (agent_id or None, now, conversation_id),
+        )
+        _db.commit()
+
+    def update_conversation_roster(
+        self, conversation_id: str, agent_ids: list[str],
+    ) -> dict:
+        """Apply a roster pick to an existing conversation.
+
+        Behavior by selection size:
+          - 0 agents → clear both agent_id and team_id (fall back to defaults).
+          - 1 agent  → set agent_id, clear team_id (solo-agent conversation).
+          - 2+ agents → find-or-create an ad-hoc team containing exactly that
+            roster, bind the conversation to team_id, and clear agent_id.
+
+        Returns the new binding so the frontend can update its conversation row
+        without a follow-up list call.
+        """
+        from services import agent_registry  # local import — avoid cycle
+
+        clean_ids = [aid for aid in (agent_ids or []) if aid]
+        now = datetime.now(timezone.utc).isoformat()
+
+        if len(clean_ids) == 0:
+            _db.execute(
+                "UPDATE conversations SET agent_id = NULL, team_id = NULL, "
+                "updated_at = ? WHERE id = ?",
+                (now, conversation_id),
+            )
+            _db.commit()
+            return {"agent_id": None, "team_id": None}
+
+        if len(clean_ids) == 1:
+            _db.execute(
+                "UPDATE conversations SET agent_id = ?, team_id = NULL, "
+                "updated_at = ? WHERE id = ?",
+                (clean_ids[0], now, conversation_id),
+            )
+            _db.commit()
+            return {"agent_id": clean_ids[0], "team_id": None}
+
+        team_id = agent_registry.find_or_create_adhoc_team(clean_ids)
+        _db.execute(
+            "UPDATE conversations SET agent_id = NULL, team_id = ?, "
+            "updated_at = ? WHERE id = ?",
+            (team_id, now, conversation_id),
+        )
+        _db.commit()
+        return {"agent_id": None, "team_id": team_id}
 
     def delete_conversation(self, conversation_id: str) -> None:
         # Hold the db lock for the whole cascade so a crash, signal, or
@@ -1078,20 +1139,28 @@ class ChatOrchestrator:
             else self._settings.get("system_prompt", "You are a helpful AI assistant.")
         )
 
-        # ── Team pipeline: activate when the selected agent coordinates a team ──
-        # When the user is chatting with an agent that's a team coordinator,
-        # decompose the request, dispatch sub-tasks to specialists via the
-        # HubRouter, chain HandoffPackets, and synthesise. Single-agent chat
-        # (no team active) falls through to the existing path below.
-        team_row = None
-        if agent_id:
+        # ── Team pipeline: activate by conversation.team_id first, then by ──
+        # the legacy "agent_id is a team coordinator" lookup.
+        # team_id-on-conversations decouples team selection from coordinator
+        # identity so multiple teams can share a coordinator and ad-hoc teams
+        # don't shadow saved ones.
+        team_id_resolved: str | None = None
+        conv_row = _db.fetchone(
+            "SELECT team_id FROM conversations WHERE id = ?", (conversation_id,),
+        )
+        if conv_row and conv_row["team_id"]:
+            team_id_resolved = conv_row["team_id"]
+        elif agent_id:
             team_row = _db.fetchone(
-                "SELECT id FROM agent_teams WHERE coordinator_id = ?",
+                "SELECT id FROM agent_teams WHERE coordinator_id = ? "
+                "AND COALESCE(is_adhoc, 0) = 0",
                 (agent_id,),
             )
-        if team_row:
+            if team_row:
+                team_id_resolved = team_row["id"]
+        if team_id_resolved:
             return self._run_team_pipeline(
-                team_id=team_row["id"],
+                team_id=team_id_resolved,
                 conversation_id=conversation_id,
                 user_message=user_message,
                 spent=spent,

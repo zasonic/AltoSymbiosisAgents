@@ -159,6 +159,20 @@ class ChatAPI(BaseAPI):
         return {"ok": True}
 
     @_requires("chat_orchestrator", default={"error": "chat unavailable"})
+    def chat_set_conversation_agent(
+        self, conversation_id: str, agent_id: str = "",
+    ) -> dict:
+        self._chat.update_conversation_agent(conversation_id, agent_id or None)
+        return {"ok": True}
+
+    @_requires("chat_orchestrator", default={"error": "chat unavailable"})
+    def chat_set_conversation_roster(
+        self, conversation_id: str, agent_ids: list[str],
+    ) -> dict:
+        result = self._chat.update_conversation_roster(conversation_id, agent_ids)
+        return {"ok": True, **result}
+
+    @_requires("chat_orchestrator", default={"error": "chat unavailable"})
     def chat_delete_conversation(self, conversation_id: str) -> dict:
         self._chat.delete_conversation(conversation_id)
         # Drop the per-conversation stop signal too. Without this, the

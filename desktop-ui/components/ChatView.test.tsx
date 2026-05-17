@@ -19,6 +19,8 @@ vi.mock("@/api/client", () => ({
     send: vi.fn(),
     stop: vi.fn(),
     newConversation: vi.fn(),
+    setConversationAgent: vi.fn(),
+    setConversationRoster: vi.fn(),
   },
   Settings: {
     get: vi.fn(),
@@ -42,9 +44,17 @@ vi.mock("@/api/client", () => ({
   Models: {
     catalog: vi.fn(),
   },
+  Agents: {
+    list: vi.fn(),
+  },
+  Teams: {
+    list: vi.fn(),
+    get: vi.fn(),
+    saveAdhoc: vi.fn(),
+  },
 }));
 
-import { Attachments, Chat, Models, PromptTemplates, Settings, Voice } from "@/api/client";
+import { Agents, Attachments, Chat, Models, PromptTemplates, Settings, Teams, Voice } from "@/api/client";
 
 // jsdom doesn't ship ResizeObserver but the virtualized message list
 // instantiates one. A no-op stand-in is enough — the export menu doesn't
@@ -117,6 +127,18 @@ beforeEach(() => {
   vi.mocked(PromptTemplates.list).mockResolvedValue([]);
   vi.mocked(PromptTemplates.use).mockReset();
   vi.mocked(Models.catalog).mockResolvedValue({ default_claude_id: "", models: [] });
+  vi.mocked(Agents.list).mockResolvedValue([]);
+  vi.mocked(Teams.list).mockResolvedValue([]);
+  vi.mocked(Teams.get).mockResolvedValue({ members: [] } as never);
+  vi.mocked(Teams.saveAdhoc).mockReset();
+  vi.mocked(Chat.setConversationAgent).mockReset();
+  vi.mocked(Chat.setConversationAgent).mockResolvedValue({ ok: true } as never);
+  vi.mocked(Chat.setConversationRoster).mockReset();
+  vi.mocked(Chat.setConversationRoster).mockResolvedValue({
+    ok: true,
+    agent_id: null,
+    team_id: null,
+  } as never);
   // jsdom doesn't ship URL.createObjectURL — the image chip renders a
   // <img src=…> from one. Stub it (and the matching revoke) so the chip
   // mounts cleanly under test.
