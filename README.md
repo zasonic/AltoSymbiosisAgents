@@ -45,15 +45,17 @@ route automatically: simple turns go to a local model when one is available,
 complex turns go to Claude.
 
 For developers: install [Node 20+](https://nodejs.org/) and clone the repo.
-On Windows, double-click `dev\dev.bat`; on macOS / Linux, run
-`npm install && npm run dev`. Python is **not** required to run `npm run dev`
-— the bootstrap install (Miniconda + sidecar venv) happens inside the
-running Electron app the first time you launch it. To run the backend pytest
-suite directly, set up a Python 3.12 venv at `backend/.venv` and
-`pip install -r backend/requirements.txt`.
+On Windows, double-click **`START_HERE.bat`** at the repo root; on macOS /
+Linux, run `npm install && npm run dev`. See
+[`START_HERE.md`](START_HERE.md) for a one-page getting-started summary.
+Python is **not** required to run `npm run dev` — the bootstrap install
+(Miniconda + sidecar venv) happens inside the running Electron app the
+first time you launch it. To run the backend pytest suite directly, set
+up a Python 3.12 venv at `backend/.venv` and `pip install -r
+backend/requirements.txt`.
 
 ```
-dev\dev.bat                  # install + dev (Windows)
+START_HERE.bat               # install + dev (Windows, double-clickable)
 npm install && npm run dev   # install + dev (macOS / Linux, dev only)
 dev\build-installer.bat      # produce NSIS installer (Windows)
 ```
