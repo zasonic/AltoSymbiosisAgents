@@ -104,18 +104,22 @@ class _AppContainer:
 
     def __init__(self, user_data: Path | None) -> None:
         # Honor --user-data so Electron's userData dir wins over platformdirs
-        # when bundled inside a packaged installer.
+        # when bundled inside a packaged installer. paths.user_dir() reads
+        # MYAI_USER_DATA on every call and falls back to platformdirs when it
+        # is unset (standalone runs, pytest).
         if user_data is not None:
             user_data.mkdir(parents=True, exist_ok=True)
-            os.environ["MYAI_USER_DATA"] = str(user_data)
-            # paths.user_dir() reads from platformdirs; for now the existing
-            # code path is preserved — userData under platformdirs already
-            # matches Electron's convention on Windows. The env var is exposed
-            # so future changes can pick it up.
+            os.environ[paths.USER_DATA_ENV] = str(user_data)
 
-        # Run the v5 → v6 migration before logging is configured (matches the
-        # invariant in the legacy main.py).
+        # Migrations run before logging is configured so the log FileHandler
+        # opens against the post-migration path. Order matters:
+        #   1. migrate_v5_user_dir   — historic app-name rename (no-op today).
+        #   2. migrate_to_unified_userdata — moves data from the platformdirs
+        #      path into the Electron userData dir when they differ.
+        #   3. migrate_legacy_install — sweeps any files left next to the
+        #      installer executable into user_dir.
         paths.migrate_v5_user_dir()
+        paths.migrate_to_unified_userdata()
         user_dir = paths.user_dir()
         paths.migrate_legacy_install(_HERE, user_dir)
 

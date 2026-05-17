@@ -60,26 +60,27 @@ dev\build-installer.bat      # produce NSIS installer (Windows)
 
 ## Where things live
 
-App data is split across two per-user directories. To open them, use
-**Settings → Diagnostics → Open data folder** inside the app — the exact
-paths are platform-dependent.
+All app data lives under a single per-user directory:
 
-- **Electron-managed data** lives under the platform's per-app data
-  directory (`%APPDATA%/altosybioagents/` on Windows,
-  `~/Library/Application Support/altosybioagents/` on macOS,
-  `~/.config/altosybioagents/` on Linux). It holds the bundled Python
-  environment (`bin/miniconda/`, `bin/sidecar-venv/`) and the Electron
-  process logs (`main.log`, `bootstrap.log`, `sidecar.log`).
-- **Sidecar-managed data** lives under the platform's per-user local
-  data directory (`%LOCALAPPDATA%/altosybioagents/altosybioagents/` on
-  Windows, `~/Library/Application Support/altosybioagents/` on macOS,
-  `~/.local/share/altosybioagents/` on Linux). It holds the settings
-  file (`settings.json`), the SQLite database (`myai.db`), and the
-  sidecar's runtime log (`app.log`).
-- **API key** lives in the OS keyring (Credential Manager / Keychain /
-  SecretService), never on disk. If the keyring is unavailable the app
-  falls back to plaintext in `settings.json` and shows a warning chip in
-  the status bar.
+- `%APPDATA%/altosybioagents/` on Windows
+- `~/Library/Application Support/altosybioagents/` on macOS
+- `~/.config/altosybioagents/` on Linux
+
+It holds the bundled Python environment (`bin/miniconda/`,
+`bin/sidecar-venv/`), the settings file (`settings.json`), the SQLite
+database (`myai.db`), and all logs (`main.log`, `bootstrap.log`,
+`sidecar.log`, `app.log`). To open the folder from inside the app:
+**Settings → Diagnostics → Open data folder**.
+
+(Older installs that wrote sidecar data to the platformdirs path
+— `%LOCALAPPDATA%/altosybioagents/altosybioagents/` on Windows,
+`~/.local/share/altosybioagents/` on Linux — are migrated the first
+time the sidecar starts after upgrading.)
+
+The **API key** lives in the OS keyring (Credential Manager / Keychain /
+SecretService), never on disk. If the keyring is unavailable the app
+falls back to plaintext in `settings.json` and shows a warning chip in
+the status bar.
 
 Source layout:
 

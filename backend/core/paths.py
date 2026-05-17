@@ -19,6 +19,7 @@ handle pins the old location.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import time
@@ -30,7 +31,13 @@ APP_NAME = "altosybioagents"
 APP_AUTHOR = "altosybioagents"
 MIGRATION_SENTINEL = ".migrated_v5"
 V5_RENAME_SENTINEL = ".migrated_v6_rename"
+UNIFIED_PATH_SENTINEL = ".migrated_unified_paths"
 LEGACY_APP_NAME = "altosybioagents"
+
+# Env var name used by server.py to forward Electron's `app.getPath("userData")`
+# into the sidecar process. When set, user_dir() returns this path so the
+# Electron shell and the Python sidecar share a single data directory.
+USER_DATA_ENV = "MYAI_USER_DATA"
 
 # Legacy artifacts that lived next to the executable in v5.0.x.
 # Order matters: SQLite WAL/SHM must move with the main DB file.
@@ -46,10 +53,29 @@ LEGACY_ARTIFACTS: tuple[str, ...] = (
 
 
 def user_dir() -> Path:
-    """Resolve the per-user writable data directory and ensure it exists."""
-    path = Path(user_data_dir(APP_NAME, APP_AUTHOR, roaming=False))
+    """Resolve the per-user writable data directory and ensure it exists.
+
+    When the sidecar is launched by the Electron shell, server.py sets
+    `MYAI_USER_DATA` to `app.getPath("userData")` so both processes write to
+    the same directory. Standalone runs (pytest, headless dev, the old
+    PyInstaller exe) fall back to platformdirs.
+    """
+    env_path = os.environ.get(USER_DATA_ENV, "").strip()
+    if env_path:
+        path = Path(env_path)
+    else:
+        path = Path(user_data_dir(APP_NAME, APP_AUTHOR, roaming=False))
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def platformdirs_user_dir() -> Path:
+    """Path that user_dir() returned before the MYAI_USER_DATA env var existed.
+
+    Used by migrate_to_unified_userdata() to find data that may need to be
+    moved into the shared Electron/sidecar directory.
+    """
+    return Path(user_data_dir(APP_NAME, APP_AUTHOR, roaming=False))
 
 
 def legacy_user_dir() -> Path:
@@ -109,6 +135,93 @@ def migrate_v5_user_dir() -> None:
         )
     except Exception as exc:
         print(f"paths.migrate_v5: unexpected error: {exc}", file=sys.stderr)
+
+
+def migrate_to_unified_userdata() -> None:
+    """
+    One-shot move of data from the legacy platformdirs path into the unified
+    Electron-userData path forwarded via MYAI_USER_DATA.
+
+    Before this migration existed, the Python sidecar resolved user_dir()
+    through platformdirs while the Electron shell wrote logs and the bundled
+    Python environment under app.getPath("userData"). On Windows these are
+    different roots (%LOCALAPPDATA%/altosybioagents/altosybioagents vs
+    %APPDATA%/altosybioagents); on Linux they are different roots too
+    (~/.local/share vs ~/.config). Users who upgrade across the unification
+    have their settings.json / myai.db / app.log under the old path; this
+    migration brings those files into the shared directory so the app sees
+    them.
+
+    Safety:
+    - No-op when MYAI_USER_DATA is unset (standalone / pytest runs).
+    - No-op when the legacy path resolves to the same directory as the new one.
+    - No-op when the target already has non-sentinel files (respects users who
+      already populated the new dir).
+    - Idempotent: sentinel-guarded with .migrated_unified_paths.
+    - Never raises: failures go to stderr and the function returns so the
+      sidecar can still finish booting.
+    """
+    try:
+        env_path = os.environ.get(USER_DATA_ENV, "").strip()
+        if not env_path:
+            return
+        target = Path(env_path)
+        target.mkdir(parents=True, exist_ok=True)
+        sentinel = target / UNIFIED_PATH_SENTINEL
+        if sentinel.exists():
+            return
+        legacy = platformdirs_user_dir()
+        if not legacy.exists() or legacy.resolve() == target.resolve():
+            sentinel.write_text("{}", encoding="utf-8")
+            return
+        ignored_sentinels = {
+            UNIFIED_PATH_SENTINEL,
+            V5_RENAME_SENTINEL,
+            MIGRATION_SENTINEL,
+        }
+        existing = [p for p in target.iterdir() if p.name not in ignored_sentinels]
+        if existing:
+            sentinel.write_text(
+                json.dumps(
+                    {"skipped": "target not empty", "at": time.time()},
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            return
+        moved: list[str] = []
+        failed: list[str] = []
+        for entry in list(legacy.iterdir()):
+            dst = target / entry.name
+            if dst.exists():
+                continue
+            try:
+                shutil.move(str(entry), str(dst))
+                moved.append(entry.name)
+            except OSError as exc:
+                failed.append(entry.name)
+                print(
+                    f"paths.migrate_unified: failed to move {entry.name}: {exc}",
+                    file=sys.stderr,
+                )
+        # Only write the sentinel when nothing failed outright, mirroring
+        # migrate_legacy_install's retry contract.
+        if failed:
+            return
+        sentinel.write_text(
+            json.dumps(
+                {
+                    "migrated_at": time.time(),
+                    "from": str(legacy),
+                    "to": str(target),
+                    "moved": moved,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        print(f"paths.migrate_unified: unexpected error: {exc}", file=sys.stderr)
 
 
 def install_root() -> Path:

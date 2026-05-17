@@ -46,9 +46,16 @@ paths:
 - SQLite DB: `user_dir() / "myai.db"`
 - API key: OS keyring under service name `altosybioagents`
 
-`user_dir()` resolves to `%APPDATA%/altosybioagents` on Windows,
+`user_dir()` reads the `MYAI_USER_DATA` environment variable, which
+`backend/server.py` populates from the `--user-data <path>` CLI arg.
+`desktop-shell/sidecar.ts` forwards `app.getPath("userData")` into that
+arg, so the sidecar and the Electron shell share a single data root:
+`%APPDATA%/altosybioagents` on Windows,
 `~/Library/Application Support/altosybioagents` on macOS, and
-`~/.local/share/altosybioagents` on Linux.
+`~/.config/altosybioagents` on Linux. Standalone runs (pytest, headless
+`python server.py` without `--user-data`) fall back to platformdirs;
+`paths.migrate_to_unified_userdata()` sweeps any pre-existing
+platformdirs data into the unified directory on first boot after upgrade.
 
 ## Schema
 
