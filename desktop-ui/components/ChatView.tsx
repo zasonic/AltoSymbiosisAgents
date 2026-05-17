@@ -15,6 +15,7 @@ import {
 } from "react-window";
 
 import {
+  Agents,
   Attachments,
   Chat,
   Models,
@@ -26,9 +27,14 @@ import {
   type ConversationExportFormat,
   type PromptTemplate,
   type SearchResult,
+  type TeamRow,
 } from "@/api/client";
 import { t } from "@/i18n";
-import { MessageBubble, type MessageRow } from "@/components/chat/MessageBubble";
+import {
+  MessageBubble,
+  type MessageRow,
+  type PipelineStep,
+} from "@/components/chat/MessageBubble";
 import { MessageRenderer } from "@/components/MessageRenderer";
 import { MessageErrorBoundary } from "@/components/MessageErrorBoundary";
 import { ModelSwitcher } from "@/components/ModelSwitcher";
@@ -45,12 +51,120 @@ interface ConversationRow {
 
 type ChatItem =
   | { kind: "message"; key: string; msg: MessageRow }
-  | { kind: "stream"; key: "stream"; buffer: string };
+  | {
+      kind: "stream";
+      key: "stream";
+      buffer: string;
+      steps: PipelineStep[];
+      phase: PipelinePhase;
+    };
 
 interface ChatRowData {
   items: ChatItem[];
   setRowHeight: (index: number, height: number) => void;
   voiceOutputEnabled: boolean;
+}
+
+// Live pipeline phases derived from the SSE stream so the streaming bubble
+// can show a "Decomposing… → Step n/N → Synthesising…" subtitle alongside
+// any per-step attribution chips. Defaults to "idle" before any pipeline
+// event fires (single-agent turns stay that way).
+type PipelinePhase =
+  | "idle"
+  | "decomposing"
+  | "running"
+  | "synthesising"
+  | "complete";
+
+interface PipelineLive {
+  steps: PipelineStep[];
+  phase: PipelinePhase;
+}
+
+interface PipelinePlanEvent {
+  type?: string;
+  steps?: { agent?: string; task?: string }[];
+}
+
+interface PipelineStepStartedEvent {
+  type?: string;
+  step?: number;
+  total?: number;
+  agent?: string;
+  task?: string;
+}
+
+interface PipelineStepCompleteEvent {
+  type?: string;
+  step?: number;
+  agent?: string;
+  task?: string;
+  confidence?: string;
+  validation_passed?: boolean;
+  tokens?: number;
+  duration_ms?: number;
+  challenger_signal?: boolean;
+}
+
+// Rebuild the live pipeline state from the SSE event log. We don't store
+// per-step status incrementally on the store — the events list is already
+// the source of truth, and re-deriving on each render keeps the store free
+// of pipeline-specific shape. Returns idle steps[] when no pipeline events
+// have fired so single-agent turns add no overhead.
+function _derivePipelineLive(
+  events: { type: string; data: unknown; at: number }[],
+): PipelineLive {
+  const stepMap = new Map<number, PipelineStep>();
+  let phase: PipelinePhase = "idle";
+  for (const evt of events) {
+    if (evt.type === "pipeline_decomposing") {
+      phase = "decomposing";
+    } else if (evt.type === "pipeline_plan") {
+      const data = evt.data as PipelinePlanEvent;
+      const steps = Array.isArray(data?.steps) ? data.steps : [];
+      stepMap.clear();
+      steps.forEach((s, i) => {
+        stepMap.set(i + 1, {
+          step: i + 1,
+          agent: s.agent || "Specialist",
+          task: s.task ?? "",
+        });
+      });
+      phase = "running";
+    } else if (evt.type === "pipeline_step_started") {
+      const data = evt.data as PipelineStepStartedEvent;
+      const idx = typeof data?.step === "number" ? data.step : 0;
+      if (!idx) continue;
+      const prev = stepMap.get(idx);
+      stepMap.set(idx, {
+        step: idx,
+        agent: data?.agent || prev?.agent || "Specialist",
+        task: data?.task ?? prev?.task ?? "",
+      });
+      phase = "running";
+    } else if (evt.type === "pipeline_step_complete") {
+      const data = evt.data as PipelineStepCompleteEvent;
+      const idx = typeof data?.step === "number" ? data.step : 0;
+      if (!idx) continue;
+      const prev = stepMap.get(idx);
+      stepMap.set(idx, {
+        step: idx,
+        agent: data?.agent || prev?.agent || "Specialist",
+        task: data?.task ?? prev?.task ?? "",
+        confidence: data?.confidence,
+        validation_passed: data?.validation_passed,
+        tokens: data?.tokens,
+        duration_ms: data?.duration_ms,
+        challenger_signal: data?.challenger_signal,
+      });
+    } else if (evt.type === "pipeline_synthesising") {
+      phase = "synthesising";
+    } else if (evt.type === "pipeline_complete") {
+      phase = "complete";
+    }
+  }
+  const steps = Array.from(stepMap.values()).sort((a, b) => a.step - b.step);
+  return { steps, phase };
 }
 
 // PR 11: image input. Browser MIME types we accept for vision blocks.
@@ -108,6 +222,13 @@ export function ChatView() {
   const [recordingTick, setRecordingTick] = useState<number>(0);
 
   const [conversations, setConversations] = useState<ConversationRow[]>([]);
+  // Phase 3: id → display name lookup so the conversation list can subtitle
+  // each row with the agent/team currently bound to it. Cheap on the way in
+  // (one Agents.list + Teams.list at mount) and rebound when an agent/team
+  // is renamed inside AgentPanel (the focus listener already refreshes the
+  // active-chat settings; same handler refetches these tables).
+  const [agentNames, setAgentNames] = useState<Record<string, string>>({});
+  const [teamNames, setTeamNames] = useState<Record<string, string>>({});
   const [activeId, setActiveId] = useState<string>("");
   // Roster picked for the next new conversation when none is active yet.
   // Existing conversations read their binding from the conversation row.
@@ -232,6 +353,34 @@ export function ChatView() {
     };
   }, [ready, activeId]);
 
+  // Phase 3: hydrate the agent/team name lookup so the conversation list can
+  // subtitle each row with who's bound to it. The lists are tiny (<100 rows
+  // total for any realistic install), so a single fetch on ready is cheap.
+  useEffect(() => {
+    if (!ready) return;
+    let alive = true;
+    Promise.all([
+      Agents.list().catch(() => [] as { id?: string; name?: string }[]),
+      Teams.list().catch(() => [] as TeamRow[]),
+    ]).then(([rawAgents, rawTeams]) => {
+      if (!alive) return;
+      const agents = rawAgents as { id?: string; name?: string }[];
+      const aMap: Record<string, string> = {};
+      for (const a of agents) {
+        if (a?.id) aMap[a.id] = a.name || "Agent";
+      }
+      const tMap: Record<string, string> = {};
+      for (const team of rawTeams) {
+        if (team?.id) tMap[team.id] = team.name || "Team";
+      }
+      setAgentNames(aMap);
+      setTeamNames(tMap);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [ready]);
+
   // Load messages when active conversation changes.
   useEffect(() => {
     if (!ready || !activeId) return;
@@ -329,30 +478,44 @@ export function ChatView() {
     try {
       // Seed the conversation with the simplest binding: if exactly one
       // agent is pending, pass it inline. Multi-agent / team pending picks
-      // go through set_conversation_roster after creation.
-      const seedAgentId =
+      // go through set_conversation_roster after creation. When the user
+      // hasn't picked anything yet, fall back to the manifest-managed
+      // default_agent_id so the New conversation button respects the
+      // pre-selection set in Settings → Chat.
+      let seedAgentId =
         pendingRoster.agentIds.length === 1 && !pendingRoster.teamId
           ? pendingRoster.agentIds[0]
           : "";
+      const hasRosterIntent =
+        pendingRoster.agentIds.length > 0 || !!pendingRoster.teamId;
+      if (!hasRosterIntent) {
+        try {
+          const s = await Settings.get();
+          const def = (s.default_agent_id as string | undefined) || "";
+          if (def && agentNames[def]) seedAgentId = def;
+        } catch {
+          /* settings unavailable; seed with nothing */
+        }
+      }
       const { id } = await Chat.newConversation(seedAgentId);
 
       const needsRoster =
         pendingRoster.agentIds.length >= 2 || !!pendingRoster.teamId;
       if (needsRoster) {
-        // teamId path is currently set by send-time roster apply; for a fresh
-        // conversation, replay the same set_conversation_roster call.
+        // Saved-team picks pass team_id explicitly so the backend binds to
+        // that preset directly rather than rerouting through
+        // find_or_create_adhoc_team — without the override, a duplicate
+        // ad-hoc team would shadow the user's intent (Phase 4 fix).
         if (pendingRoster.teamId) {
-          // Apply the team via Chat.setConversationAgent (coordinator alone)
-          // would be wrong here — use roster instead. The backend treats a
-          // single-id roster as solo, but we want the team. So fetch the
-          // team's members and pass them.
           try {
             const team = (await Teams.get(pendingRoster.teamId)) as {
               members?: { id: string }[];
             };
             const memberIds = (team?.members ?? []).map((m) => m.id);
             if (memberIds.length >= 2) {
-              await Chat.setConversationRoster(id, memberIds);
+              await Chat.setConversationRoster(
+                id, memberIds, pendingRoster.teamId,
+              );
             }
           } catch {
             // best-effort: conversation still exists, just without the team
@@ -850,6 +1013,12 @@ export function ChatView() {
   };
 
   const streamingBuffer = activeChat?.conversationId === activeId ? activeChat.buffer : "";
+  const streamingEvents =
+    activeChat?.conversationId === activeId ? activeChat.events : null;
+  const pipelineLive = useMemo<PipelineLive>(
+    () => (streamingEvents ? _derivePipelineLive(streamingEvents) : { steps: [], phase: "idle" }),
+    [streamingEvents],
+  );
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeId),
     [conversations, activeId],
@@ -876,8 +1045,11 @@ export function ChatView() {
     try {
       let result: { agent_id: string | null; team_id: string | null };
       if (pick.teamId) {
-        // Picking a saved team preset: re-hydrate members and route through
-        // setConversationRoster so the backend reuses the right team id.
+        // Picking a saved team preset: hand the team_id over directly so
+        // the backend skips the find_or_create_adhoc_team detour and binds
+        // straight to the saved row. Without the override the orchestrator
+        // could rebind to a coincidentally-matching ad-hoc team or create
+        // a duplicate ad-hoc copy of the saved team (Phase 4 fix).
         const team = (await Teams.get(pick.teamId)) as {
           members?: { id: string }[];
         };
@@ -885,13 +1057,10 @@ export function ChatView() {
         if (memberIds.length === 0) {
           throw new Error("Selected team has no members");
         }
-        // Use the team's id directly via a roster of its members; the
-        // find_or_create reuses the team since membership matches.
-        const rsp = await Chat.setConversationRoster(activeId, memberIds);
-        // If the saved team had is_adhoc=0 but the roster matched an ad-hoc
-        // team, the response team_id may differ. Force the saved team id.
-        result = { agent_id: null, team_id: pick.teamId };
-        void rsp;
+        const rsp = await Chat.setConversationRoster(
+          activeId, memberIds, pick.teamId,
+        );
+        result = { agent_id: rsp.agent_id, team_id: rsp.team_id };
       } else {
         const rsp = await Chat.setConversationRoster(activeId, pick.agentIds);
         result = { agent_id: rsp.agent_id, team_id: rsp.team_id };
@@ -922,11 +1091,22 @@ export function ChatView() {
       key: m.id,
       msg: m,
     }));
-    if (streamingBuffer) {
-      xs.push({ kind: "stream", key: "stream", buffer: streamingBuffer });
+    // Show the streaming bubble as soon as the pipeline starts emitting
+    // events (even before the first token), so the attribution chips can
+    // render while specialists are still working.
+    const hasLivePipeline =
+      pipelineLive.phase !== "idle" && pipelineLive.phase !== "complete";
+    if (streamingBuffer || hasLivePipeline) {
+      xs.push({
+        kind: "stream",
+        key: "stream",
+        buffer: streamingBuffer,
+        steps: pipelineLive.steps,
+        phase: pipelineLive.phase,
+      });
     }
     return xs;
-  }, [messages, streamingBuffer]);
+  }, [messages, streamingBuffer, pipelineLive]);
 
   // Per-row measured heights so VariableSizeList can render only the rows
   // that fit the viewport. Heights start as estimates and snap to the real
@@ -1017,21 +1197,47 @@ export function ChatView() {
             />
           ) : (
             <>
-              {conversations.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setActiveId(c.id)}
-                  className={`w-full text-left px-4 py-2 text-sm border-b border-line/30 ${
-                    c.id === activeId
-                      ? "bg-accent/10 text-ink"
-                      : "text-ink-dim hover:bg-bg-2"
-                  }`}
-                >
-                  <div className="truncate font-medium">{c.title || "Untitled"}</div>
-                  <div className="text-[11px] text-ink-faint">{c.updated_at?.slice(0, 16)}</div>
-                </button>
-              ))}
+              {conversations.map((c) => {
+                const teamLabel = c.team_id ? teamNames[c.team_id] : "";
+                const agentLabel = c.agent_id ? agentNames[c.agent_id] : "";
+                const rosterLabel = teamLabel
+                  ? `Team · ${teamLabel}`
+                  : agentLabel
+                    ? agentLabel
+                    : "";
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setActiveId(c.id)}
+                    className={`w-full text-left px-4 py-2 text-sm border-b border-line/30 ${
+                      c.id === activeId
+                        ? "bg-accent/10 text-ink"
+                        : "text-ink-dim hover:bg-bg-2"
+                    }`}
+                  >
+                    <div className="truncate font-medium">
+                      {c.title || "Untitled"}
+                    </div>
+                    <div className="text-[11px] text-ink-faint flex items-center gap-1.5">
+                      <span>{c.updated_at?.slice(0, 16)}</span>
+                      {rosterLabel && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span
+                            className={
+                              teamLabel ? "text-accent" : "text-ink-dim"
+                            }
+                            data-testid={`conv-roster-${c.id}`}
+                          >
+                            {rosterLabel}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
               {!conversations.length && !loadError && (
                 <div className="p-4 text-sm text-ink-faint">No conversations yet.</div>
               )}
@@ -1056,6 +1262,10 @@ export function ChatView() {
             <div className="text-sm font-medium text-ink truncate flex-1 min-w-0">
               {activeConversation?.title || "Untitled"}
             </div>
+            <ConversationBudgetWidget
+              conversationId={activeId}
+              streaming={!!activeChat && activeChat.conversationId === activeId}
+            />
             <RosterPicker
               agentId={currentAgentId}
               teamId={currentTeamId}
@@ -1705,18 +1915,41 @@ function ChatListRow({ index, style, data }: ListChildComponentProps<ChatRowData
             aria-live="polite"
             aria-atomic="false"
             className="max-w-[80%] rounded-xl px-4 py-2 text-sm bg-bg-2 text-ink border border-line"
+            data-testid="chat-stream-bubble"
           >
-            {/* Don't expose the speaker on the still-streaming buffer; the
-                speaker would synthesize a partial sentence. The persisted
-                MessageBubble below picks it up after chat_done. */}
-            <MessageErrorBoundary>
-              <MessageRenderer content={item.buffer} role="assistant" />
-            </MessageErrorBoundary>
-            <span
-              role="status"
-              aria-label="Assistant is thinking"
-              className="inline-block ml-1 h-3 w-1 bg-accent animate-pulse align-middle"
-            />
+            {item.steps.length > 0 && (
+              <LivePipelineAttribution
+                steps={item.steps}
+                phase={item.phase}
+              />
+            )}
+            {item.buffer ? (
+              <>
+                {/* Don't expose the speaker on the still-streaming buffer; the
+                    speaker would synthesize a partial sentence. The persisted
+                    MessageBubble below picks it up after chat_done. */}
+                <MessageErrorBoundary>
+                  <MessageRenderer content={item.buffer} role="assistant" />
+                </MessageErrorBoundary>
+                <span
+                  role="status"
+                  aria-label="Assistant is thinking"
+                  className="inline-block ml-1 h-3 w-1 bg-accent animate-pulse align-middle"
+                />
+              </>
+            ) : (
+              <span
+                role="status"
+                aria-label="Assistant is thinking"
+                className="text-ink-faint text-xs italic"
+              >
+                {item.phase === "decomposing"
+                  ? "Planning sub-tasks…"
+                  : item.phase === "synthesising"
+                    ? "Synthesising…"
+                    : "Working…"}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -1725,6 +1958,164 @@ function ChatListRow({ index, style, data }: ListChildComponentProps<ChatRowData
 }
 
 // MessageBubble extracted to components/chat/MessageBubble.tsx (Layer C2).
+
+// ── Phase 3: in-flight team-pipeline attribution ────────────────────────────
+//
+// Mirrors the post-stream PipelineAttribution chips inside MessageBubble,
+// but drives off live SSE events so the user can see steps start, complete,
+// or fail while the team is still working. Steps without a confidence value
+// yet render as "in progress"; once pipeline_step_complete arrives, the
+// chip switches to the same accent/warn palette the persisted strip uses.
+
+function LivePipelineAttribution({
+  steps,
+  phase,
+}: {
+  steps: PipelineStep[];
+  phase: PipelinePhase;
+}) {
+  const phaseLabel =
+    phase === "decomposing"
+      ? "Planning…"
+      : phase === "synthesising"
+        ? "Synthesising…"
+        : phase === "running"
+          ? "Working…"
+          : "";
+  return (
+    <div
+      data-testid="chat-stream-pipeline"
+      className="mb-2"
+      aria-live="polite"
+    >
+      <div className="flex items-center gap-1 flex-wrap">
+        {steps.map((s) => {
+          const done = s.validation_passed !== undefined;
+          const tone = done
+            ? s.validation_passed === false
+              ? "border-warn/40 bg-warn/10 text-warn"
+              : "border-accent/30 bg-accent/10 text-ink"
+            : "border-line bg-bg-1 text-ink-dim";
+          return (
+            <span
+              key={`live-${s.step}`}
+              data-testid={`pipeline-live-chip-${s.step}`}
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${tone}`}
+              title={s.task || s.agent}
+            >
+              <span className="opacity-60">{s.step}.</span>
+              <span className="truncate max-w-[10rem]">{s.agent}</span>
+              {!done && (
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-1.5 w-1.5 rounded-full bg-accent animate-pulse"
+                />
+              )}
+            </span>
+          );
+        })}
+        {phaseLabel && (
+          <span className="text-[11px] text-ink-faint italic ml-1">
+            {phaseLabel}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── G carry-over: per-conversation spend-vs-budget widget ──────────────────
+//
+// Pulls cumulative cost from /api/chat/conversation_budget on every
+// conversation switch and re-fetches after each chat-stream completes so
+// the value reflects the just-finished turn. When no per-conversation
+// budget is configured (max_conversation_budget_usd <= 0) the widget
+// shows the spend as a plain dollar figure and skips the progress bar.
+
+interface ConversationBudgetWidgetProps {
+  conversationId: string;
+  streaming: boolean;
+}
+
+function ConversationBudgetWidget({
+  conversationId,
+  streaming,
+}: ConversationBudgetWidgetProps) {
+  const [data, setData] = useState<{
+    spent_usd: number;
+    budget_usd: number;
+    warn_pct: number;
+  } | null>(null);
+
+  // Refetch whenever the conversation switches OR a stream just ended
+  // (``streaming`` flipping from true → false), so the chip stays in
+  // sync with the latest assistant turn.
+  useEffect(() => {
+    if (!conversationId) return;
+    if (streaming) return;
+    let alive = true;
+    Chat.conversationBudget(conversationId)
+      .then((rsp) => {
+        if (alive) setData(rsp);
+      })
+      .catch(() => {
+        if (alive) setData(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [conversationId, streaming]);
+
+  if (!data) return null;
+  const { spent_usd, budget_usd, warn_pct } = data;
+  const hasBudget = budget_usd > 0;
+  const pct = hasBudget
+    ? Math.max(0, Math.min(100, (spent_usd / budget_usd) * 100))
+    : 0;
+  const overWarn = hasBudget && pct >= warn_pct;
+  const overBudget = hasBudget && pct >= 100;
+
+  const tone = overBudget
+    ? "border-err/50 bg-err/10 text-err"
+    : overWarn
+      ? "border-warn/40 bg-warn/10 text-ink"
+      : "border-line bg-bg-2 text-ink-dim";
+
+  const label = hasBudget
+    ? `$${spent_usd.toFixed(2)} / $${budget_usd.toFixed(2)}`
+    : `$${spent_usd.toFixed(4)}`;
+
+  return (
+    <div
+      data-testid="conversation-budget"
+      className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] tabular-nums ${tone}`}
+      title={
+        hasBudget
+          ? `Conversation spend · ${pct.toFixed(0)}% of $${budget_usd.toFixed(2)} budget (warn at ${warn_pct.toFixed(0)}%)`
+          : `Conversation spend · no budget set`
+      }
+    >
+      <span>{label}</span>
+      {hasBudget && (
+        <span
+          aria-hidden="true"
+          className="h-1.5 w-16 rounded-full bg-bg-3 overflow-hidden"
+        >
+          <span
+            className={`block h-full transition-all ${
+              overBudget
+                ? "bg-err"
+                : overWarn
+                  ? "bg-warn"
+                  : "bg-accent"
+            }`}
+            style={{ width: `${pct}%` }}
+          />
+        </span>
+      )}
+    </div>
+  );
+}
 
 // ── Export menu (PR 7) ──────────────────────────────────────────────────────
 //

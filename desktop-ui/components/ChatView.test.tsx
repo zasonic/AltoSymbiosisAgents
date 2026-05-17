@@ -21,6 +21,7 @@ vi.mock("@/api/client", () => ({
     newConversation: vi.fn(),
     setConversationAgent: vi.fn(),
     setConversationRoster: vi.fn(),
+    conversationBudget: vi.fn(),
   },
   Settings: {
     get: vi.fn(),
@@ -107,6 +108,12 @@ beforeEach(() => {
   vi.mocked(Chat.exportConversation).mockReset();
   vi.mocked(Chat.searchConversations).mockReset();
   vi.mocked(Chat.searchConversations).mockResolvedValue([]);
+  vi.mocked(Chat.conversationBudget).mockResolvedValue({
+    conversation_id: "conv-A",
+    spent_usd: 0,
+    budget_usd: 0,
+    warn_pct: 80,
+  });
   vi.mocked(Settings.get).mockResolvedValue({
     voice_input_enabled: false,
     voice_output_enabled: false,

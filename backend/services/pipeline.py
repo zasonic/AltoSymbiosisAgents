@@ -98,6 +98,52 @@ def _str_list(raw) -> list:
     return out
 
 
+def _parse_allowed_tools(raw) -> list[str]:
+    """Decode an agent/team ``allowed_tools`` JSON column into a list.
+
+    Returns [] for NULL, empty strings, "[]", or anything that doesn't
+    decode into a list of strings. The "[]" sentinel means "no per-row
+    restriction" everywhere in the schema, so it must round-trip to an
+    empty list here.
+    """
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    if not isinstance(raw, str):
+        return []
+    text = raw.strip()
+    if not text or text == "[]":
+        return []
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(x).strip() for x in parsed if str(x).strip()]
+
+
+def _union_allowed_tools(agent_tools: list[str], team_tools: list[str]) -> list[str]:
+    """Union an agent's allowed_tools with the team's.
+
+    Both sides are whitelists; an empty list on either side means "no
+    constraint contributed". Returns the merged, deduplicated, sorted list,
+    or [] when neither side restricts (the caller treats [] as "skip the
+    restriction notice").
+    """
+    if not agent_tools and not team_tools:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for src in (agent_tools, team_tools):
+        for tool in src:
+            if tool and tool not in seen:
+                seen.add(tool)
+                out.append(tool)
+    return sorted(out)
+
+
 def mark_abandoned_provisional_checkpoints() -> int:
     """Mark every still-provisional row as 'abandoned' on sidecar startup.
 
@@ -252,6 +298,13 @@ class PipelineExecutor:
         if not team:
             raise ValueError(f"Team not found: {team_id}")
 
+        # Phase 4: per-team tool restrictions. Parsed once per pipeline run
+        # and unioned with each specialist's own allowed_tools list at
+        # dispatch time inside _invoke_specialist. NULL or [] means "no
+        # team-level constraint; trust the per-agent lists".
+        team_allowed_tools = _parse_allowed_tools(team["allowed_tools"]) \
+            if "allowed_tools" in team.keys() else []
+
         coordinator_id = team["coordinator_id"]
         coordinator_row = _db.fetchone(
             "SELECT * FROM agents WHERE id = ?", (coordinator_id,)
@@ -348,6 +401,23 @@ class PipelineExecutor:
             specialist_system = (
                 specialist.get("system_prompt") or "You are a helpful specialist."
             )
+
+            # Phase 4: tool-restriction notice. Union the team-level allowed
+            # tools list with this specialist's own list — when either side
+            # restricts, append a one-liner so the specialist self-limits
+            # the tools it claims to use in its deliverable. Empty union
+            # means "no tighter constraint than what's already in place".
+            specialist_allowed_tools = _parse_allowed_tools(
+                specialist.get("allowed_tools"),
+            )
+            effective_tools = _union_allowed_tools(
+                specialist_allowed_tools, team_allowed_tools,
+            )
+            if effective_tools:
+                specialist_system += (
+                    "\n\nAllowed tools for this team: "
+                    + ", ".join(effective_tools)
+                )
 
             upstream_context = self._build_upstream_context(handoffs)
             if upstream_context:

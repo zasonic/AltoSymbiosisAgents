@@ -46,6 +46,7 @@ class ChatSetAgentIn(BaseModel):
 class ChatSetRosterIn(BaseModel):
     conversation_id: str
     agent_ids: list[str] = Field(default_factory=list)
+    team_id: Optional[str] = None
 
 
 class ChatBranchIn(BaseModel):
@@ -118,7 +119,7 @@ async def set_conversation_agent(body: ChatSetAgentIn, request: Request) -> dict
 @router.post("/set_conversation_roster")
 async def set_conversation_roster(body: ChatSetRosterIn, request: Request) -> dict:
     return get_api(request).chat_set_conversation_roster(
-        body.conversation_id, body.agent_ids,
+        body.conversation_id, body.agent_ids, team_id=body.team_id,
     )
 
 
@@ -142,6 +143,11 @@ async def export(body: ChatExportIn, request: Request) -> dict:
 @router.get("/token_stats")
 async def token_stats(request: Request) -> dict:
     return get_api(request).chat_token_stats()
+
+
+@router.get("/conversation_budget/{conversation_id}")
+async def conversation_budget(conversation_id: str, request: Request) -> dict:
+    return get_api(request).chat_conversation_budget(conversation_id)
 
 
 @router.get("/router_stats")

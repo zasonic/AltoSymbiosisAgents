@@ -308,6 +308,7 @@ class ChatOrchestrator:
 
     def update_conversation_roster(
         self, conversation_id: str, agent_ids: list[str],
+        team_id: str | None = None,
     ) -> dict:
         """Apply a roster pick to an existing conversation.
 
@@ -317,6 +318,15 @@ class ChatOrchestrator:
           - 2+ agents → find-or-create an ad-hoc team containing exactly that
             roster, bind the conversation to team_id, and clear agent_id.
 
+        When ``team_id`` is passed explicitly (saved-team pick from the
+        RosterPicker), short-circuit the find-or-create step and bind to
+        that team directly. Without this, picking "Saved Team A" with
+        members [m1, m2] would route through find_or_create_adhoc_team and
+        either reuse a coincidentally-matching ad-hoc team or create a
+        brand-new ad-hoc duplicate of the saved team's membership — both
+        of which silently rebind the conversation away from the user's
+        explicit choice.
+
         Returns the new binding so the frontend can update its conversation row
         without a follow-up list call.
         """
@@ -324,6 +334,25 @@ class ChatOrchestrator:
 
         clean_ids = [aid for aid in (agent_ids or []) if aid]
         now = datetime.now(timezone.utc).isoformat()
+
+        if team_id:
+            # Confirm the team exists before binding so a stale id from the
+            # renderer can't leave the conversation pointing at a deleted
+            # team_id (which would 404 the next pipeline run).
+            row = _db.fetchone(
+                "SELECT id FROM agent_teams WHERE id = ?", (team_id,),
+            )
+            if row:
+                _db.execute(
+                    "UPDATE conversations SET agent_id = NULL, team_id = ?, "
+                    "updated_at = ? WHERE id = ?",
+                    (team_id, now, conversation_id),
+                )
+                _db.commit()
+                return {"agent_id": None, "team_id": team_id}
+            # Unknown team_id: fall through to the membership-driven path so
+            # the user still ends up with the right roster bound, just via
+            # an ad-hoc team rather than the missing preset.
 
         if len(clean_ids) == 0:
             _db.execute(
@@ -343,14 +372,14 @@ class ChatOrchestrator:
             _db.commit()
             return {"agent_id": clean_ids[0], "team_id": None}
 
-        team_id = agent_registry.find_or_create_adhoc_team(clean_ids)
+        resolved_team_id = agent_registry.find_or_create_adhoc_team(clean_ids)
         _db.execute(
             "UPDATE conversations SET agent_id = NULL, team_id = ?, "
             "updated_at = ? WHERE id = ?",
-            (team_id, now, conversation_id),
+            (resolved_team_id, now, conversation_id),
         )
         _db.commit()
-        return {"agent_id": None, "team_id": team_id}
+        return {"agent_id": None, "team_id": resolved_team_id}
 
     def delete_conversation(self, conversation_id: str) -> None:
         # Hold the db lock for the whole cascade so a crash, signal, or
@@ -1982,14 +2011,18 @@ class ChatOrchestrator:
         asst_msg_id = str(uuid.uuid4())
         resp_now = datetime.now(timezone.utc).isoformat()
 
+        steps_json = (
+            json.dumps(result.steps) if result.steps else None
+        )
         _db.execute(
             "INSERT INTO messages (id, conversation_id, role, content, model_used, "
-            "route_reason, tokens_in, tokens_out, cost_usd, created_at) "
-            "VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?)",
+            "route_reason, tokens_in, tokens_out, cost_usd, created_at, "
+            "pipeline_steps_json) "
+            "VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 asst_msg_id, conversation_id, redact(synthesis), "pipeline",
                 route_reason, result.total_tokens_in, result.total_tokens_out,
-                cost, resp_now,
+                cost, resp_now, steps_json,
             ),
         )
         _db.execute(
@@ -2043,6 +2076,42 @@ class ChatOrchestrator:
             message_id=asst_msg_id,
             budget_warning=budget_warning,
         )
+
+    # ── Per-conversation spend vs budget ────────────────────────────────────
+    #
+    # Backs the G carry-over chat-header widget: shows the user how much of
+    # their per-conversation budget the current chat has consumed. Reads
+    # cumulative cost from token_usage (same column TurnLifecycle's budget
+    # check uses, so the two never disagree) and the budget/warn_pct from
+    # settings. ``warn_pct`` is normalised to the same scale TurnLifecycle
+    # already does — settings stores it as a percentage (0–100), so the
+    # JSON contract is also 0–100 and the renderer can compare directly.
+
+    def get_conversation_budget(self, conversation_id: str) -> dict:
+        if not conversation_id:
+            return {
+                "conversation_id": "",
+                "spent_usd":  0.0,
+                "budget_usd": 0.0,
+                "warn_pct":   0.0,
+            }
+        try:
+            row = _db.fetchone(
+                "SELECT COALESCE(SUM(cost_usd), 0) AS total FROM token_usage "
+                "WHERE conversation_id = ?",
+                (conversation_id,),
+            )
+        except Exception:
+            row = None
+        spent = float(row["total"]) if row else 0.0
+        budget = float(self._settings.get("max_conversation_budget_usd", 0.0) or 0.0)
+        warn_pct = float(self._settings.get("budget_warning_threshold_pct", 80.0) or 80.0)
+        return {
+            "conversation_id": conversation_id,
+            "spent_usd":  round(spent, 6),
+            "budget_usd": budget,
+            "warn_pct":   warn_pct,
+        }
 
     # ── Token stats ──────────────────────────────────────────────────────────
 

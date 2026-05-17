@@ -181,6 +181,9 @@ export interface SettingsPayload {
   voice_output_enabled: boolean;
   stt_model_id: string;
   tts_voice_id: string;
+  // Phase 4: agent pre-selected for new conversations. NULL/empty when the
+  // user wants smart routing for every fresh chat.
+  default_agent_id?: string | null;
 }
 
 // ── Settings manifest ─────────────────────────────────────────────────────
@@ -328,12 +331,20 @@ export const Chat = {
       conversation_id,
       agent_id,
     }),
-  setConversationRoster: (conversation_id: string, agent_ids: string[]) =>
+  setConversationRoster: (
+    conversation_id: string,
+    agent_ids: string[],
+    team_id?: string,
+  ) =>
     api.post<{
       ok: true;
       agent_id: string | null;
       team_id: string | null;
-    }>("/api/chat/set_conversation_roster", { conversation_id, agent_ids }),
+    }>("/api/chat/set_conversation_roster", {
+      conversation_id,
+      agent_ids,
+      ...(team_id ? { team_id } : {}),
+    }),
   list: (limit = 30) => api.get<unknown[]>("/api/chat/conversations", { limit }),
   messages: (conversation_id: string, limit = 100) =>
     api.get<unknown[]>(`/api/chat/messages/${encodeURIComponent(conversation_id)}`, { limit }),
@@ -359,11 +370,34 @@ export const Chat = {
     }),
   tokenStats: () => api.get<unknown>("/api/chat/token_stats"),
   routerStats: () => api.get<unknown>("/api/chat/router_stats"),
+  // G carry-over: cumulative spend + per-conversation budget for the
+  // in-chat progress widget. ``budget_usd`` is 0 when the user hasn't
+  // capped the conversation — renderer treats that as "no budget".
+  conversationBudget: (conversation_id: string) =>
+    api.get<{
+      conversation_id: string;
+      spent_usd:       number;
+      budget_usd:      number;
+      warn_pct:        number;
+    }>(
+      `/api/chat/conversation_budget/${encodeURIComponent(conversation_id)}`,
+    ),
 };
+
+export interface AgentPerformance {
+  agent_id:           string;
+  total_interactions: number;
+  alignment_rate:     number;
+  period:             string;
+}
 
 export const Agents = {
   list: () => api.get<unknown[]>("/api/agents"),
   get: (id: string) => api.get<unknown>(`/api/agents/${encodeURIComponent(id)}`),
+  performance: (id: string) =>
+    api.get<AgentPerformance>(
+      `/api/agents/${encodeURIComponent(id)}/performance`,
+    ),
   create: (input: {
     name: string;
     description: string;

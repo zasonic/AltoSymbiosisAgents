@@ -645,6 +645,19 @@ FIELD_METADATA: dict[str, dict] = {
         "type":        "textarea",
         "group":       "chat",
     },
+    "default_agent_id": {
+        "label":       "Default agent",
+        "description": (
+            "Agent pre-selected when you click New conversation. "
+            "Leave blank to start with smart routing instead."
+        ),
+        "type":        "enum",
+        "group":       "chat",
+        # Options are populated dynamically at manifest-build time from the
+        # agents table — keeping a single empty default here so the renderer
+        # has something to render even when the agent list is unreachable.
+        "options":     [{"value": "", "label": "— Smart routing (no default agent) —"}],
+    },
 
     # ── Smart routing ─────────────────────────────────────────────────────────
     "routing_enabled": {

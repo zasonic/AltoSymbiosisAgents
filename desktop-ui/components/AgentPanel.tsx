@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { Agents } from "@/api/client";
+import { Agents, type AgentPerformance } from "@/api/client";
 import { useAppStore } from "@/stores/appStore";
 
 interface AgentRow {
@@ -135,6 +135,7 @@ export function AgentPanel() {
                 {a.role && (
                   <span className="pill text-[10px]">role: {a.role}</span>
                 )}
+                <AgentPerformancePill agentId={a.id} />
               </div>
               <div className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition">
                 <button
@@ -175,6 +176,67 @@ export function AgentPanel() {
         />
       )}
     </div>
+  );
+}
+
+// ── Phase 3: 7-day alignment performance pill ─────────────────────────────────
+//
+// Fetches GET /agents/{id}/performance per card. Cheap (a single GROUP BY on
+// agent_performance) and lazy — failures fall back to "no data" so the card
+// still renders. The hex palette mirrors the cream theme: accent for the
+// healthy band (≥90% aligned), warn for the marginal band, err for clearly
+// drifting agents.
+
+function _toneFor(rate: number): string {
+  if (rate >= 0.9) return "border-accent/40 bg-accent/10 text-ink";
+  if (rate >= 0.7) return "border-warn/40 bg-warn/10 text-ink";
+  return "border-err/40 bg-err/10 text-err";
+}
+
+function AgentPerformancePill({ agentId }: { agentId: string }) {
+  const [data, setData] = useState<AgentPerformance | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    Agents.performance(agentId)
+      .then((res) => {
+        if (alive) setData(res);
+      })
+      .catch(() => {
+        /* leave data null; the pill will show "no data" */
+      })
+      .finally(() => {
+        if (alive) setLoaded(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [agentId]);
+
+  if (!loaded) {
+    return <span className="pill text-[10px] text-ink-faint">7d: …</span>;
+  }
+  if (!data || data.total_interactions === 0) {
+    return (
+      <span
+        className="pill text-[10px] text-ink-faint"
+        title="No alignment signal in the last 7 days"
+        data-testid={`agent-performance-${agentId}`}
+      >
+        7d: no data
+      </span>
+    );
+  }
+  const pct = Math.round(data.alignment_rate * 100);
+  return (
+    <span
+      className={`pill text-[10px] ${_toneFor(data.alignment_rate)}`}
+      title={`${pct}% aligned across ${data.total_interactions} interactions (last 7 days)`}
+      data-testid={`agent-performance-${agentId}`}
+    >
+      7d: {pct}% aligned · {data.total_interactions}
+    </span>
   );
 }
 

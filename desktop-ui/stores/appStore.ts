@@ -442,10 +442,18 @@ export const useAppStore = create<AppState>()(
       name: "altosybioagents-prefs",
       storage: createJSONStorage(() => localStorage),
       // Only persist user preferences, never runtime state.
+      //
+      // ``hasCompletedFirstRun`` is intentionally NOT persisted here: the
+      // backend's settings.first_run_complete is the sole source of truth,
+      // hydrated on every sidecar-ready by App.tsx (Settings.get()). Keeping
+      // a duplicate in localStorage caused first-run wizards to flash on
+      // installs where the renderer's localStorage was wiped (uninstall,
+      // profile reset) but the backend DB still held first_run_complete=1 —
+      // and the inverse on dev rebuilds where localStorage survived a DB
+      // wipe.
       partialize: (state) => ({
         activeView: state.activeView,
         studioMode: state.studioMode,
-        hasCompletedFirstRun: state.hasCompletedFirstRun,
         bootstrapped: state.bootstrapped,
       }),
     },

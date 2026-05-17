@@ -168,6 +168,72 @@ class LocalClient(LLMClient):
     def _backend(self, backend: str | None = None) -> str:
         return backend or self._effective_backend()
 
+    def _backend_for_model(self, model: str | None) -> str:
+        """Pick the local backend that owns ``model``.
+
+        When the user pins a bundled GGUF id in the chat-header model picker
+        (via ``pinned_local_model``) the orchestrator forwards the model name
+        without changing ``local_backend_mode``. Without this hook, the call
+        falls through to whatever ``_effective_backend()`` returns (typically
+        Ollama in auto mode) and 404s because Ollama doesn't have that
+        model. So: check the ``bundled_models`` table first; if the id is a
+        known bundled GGUF, route the call to the bundled server even when
+        the global backend mode is set to something else.
+
+        Falls back to the user-configured backend when ``model`` is missing
+        or unknown to the bundled catalog — preserving existing behavior for
+        Ollama / LM Studio pins and the auto path.
+        """
+        if model:
+            try:
+                from db import fetchone as _fetchone
+                row = _fetchone(
+                    "SELECT model_id FROM bundled_models WHERE model_id = ?",
+                    (model,),
+                )
+                if row:
+                    return "bundled"
+            except Exception:
+                # DB unavailable; fall back to the user-configured backend.
+                pass
+        return self._effective_backend()
+
+    def _ensure_bundled_running(self, model: str | None) -> None:
+        """Autostart the bundled llama-server when a bundled model is requested.
+
+        The persistent autostart in ``Api.maybe_autostart_bundled_server``
+        only fires on sidecar boot and only when ``local_backend_mode ==
+        "bundled"``. The chat-header model picker (Phase 9 → Layer-C2 pin
+        flow) writes ``pinned_local_model`` to a bundled GGUF id without
+        touching the mode, so a previously-downloaded model still needs to
+        be lazily spun up on the first chat turn. Best-effort: failures
+        leave the existing 0-port URL path to surface the error to chat.
+        """
+        if not model:
+            return
+        bs = self._bundled_server
+        if bs is None:
+            return
+        try:
+            if bs.is_running() and bs.model_id() == model:
+                return
+        except Exception:
+            return
+        try:
+            from db import fetchone as _fetchone
+            row = _fetchone(
+                "SELECT file_path FROM bundled_models WHERE model_id = ?",
+                (model,),
+            )
+        except Exception:
+            return
+        if not row:
+            return
+        try:
+            bs.start(row["file_path"], model_id=model)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("bundled lazy-start failed for %s: %s", model, exc)
+
     def is_available(self, backend: str | None = None) -> bool:
         """Check if a local model backend is reachable."""
         try:
@@ -545,8 +611,10 @@ class LocalClient(LLMClient):
     def chat(self, system: str, user_message: str, model: str | None = None,
              max_tokens: int = 2048) -> str:
         """Single-turn chat. Returns response text, or a fallback string on error."""
-        b = self._backend()
         model = model or self._settings.get("default_local_model", "")
+        b = self._backend_for_model(model)
+        if b == "bundled":
+            self._ensure_bundled_running(model)
         url = self._url(b)
         messages = []
         if system:
@@ -570,8 +638,10 @@ class LocalClient(LLMClient):
     def chat_multi_turn(self, system: str, messages: list, model: str | None = None,
                         max_tokens: int = 2048) -> str:
         """Multi-turn chat. Returns response text, or a fallback string on error."""
-        b = self._backend()
         model = model or self._settings.get("default_local_model", "")
+        b = self._backend_for_model(model)
+        if b == "bundled":
+            self._ensure_bundled_running(model)
         url = self._url(b)
         msgs = []
         if system:
@@ -601,8 +671,10 @@ class LocalClient(LLMClient):
         local backends do not report usage, so the second element is always None.
         Falls back to non-streaming on any error rather than crashing.
         """
-        b = self._backend()
         model = model or self._settings.get("default_local_model", "")
+        b = self._backend_for_model(model)
+        if b == "bundled":
+            self._ensure_bundled_running(model)
         url = self._url(b)
         msgs = []
         if system:
@@ -756,8 +828,14 @@ class LocalClient(LLMClient):
         method falls back to plain ``chat_multi_turn`` and returns
         ``logprobs=None`` so the escalation ladder can drop to self-score.
         """
-        b = self._backend()
-        model = self._settings.get("default_local_model", "") or ""
+        # Respect the chat-header pin (Phase 9 → C carry-over): pinning a
+        # bundled GGUF should route this through the bundled server too,
+        # not whatever ``local_backend_mode`` says globally.
+        pinned = self._settings.get("pinned_local_model", "") or ""
+        model = pinned or (self._settings.get("default_local_model", "") or "")
+        b = self._backend_for_model(model)
+        if b == "bundled":
+            self._ensure_bundled_running(model)
         url = self._url(b)
         msgs: list[dict] = []
         if system:
@@ -823,8 +901,14 @@ class LocalClient(LLMClient):
         ``logprobs=None`` because we cannot reliably reconstruct them
         from a half-broken stream.
         """
-        b = self._backend()
-        model = self._settings.get("default_local_model", "") or ""
+        # Respect the chat-header pin (Phase 9 → C carry-over): pinning a
+        # bundled GGUF should route this through the bundled server too,
+        # not whatever ``local_backend_mode`` says globally.
+        pinned = self._settings.get("pinned_local_model", "") or ""
+        model = pinned or (self._settings.get("default_local_model", "") or "")
+        b = self._backend_for_model(model)
+        if b == "bundled":
+            self._ensure_bundled_running(model)
         url = self._url(b)
         msgs: list[dict] = []
         if system:

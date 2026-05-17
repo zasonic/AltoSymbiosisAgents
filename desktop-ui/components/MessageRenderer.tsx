@@ -30,7 +30,12 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
-import "highlight.js/styles/github-dark.css";
+// Code-block syntax theme: cream-friendly light palette to match the
+// app's pastel design direction (memory/design_direction.md). Atom-One
+// Light keeps the foreground close to the chat bubble background so code
+// fences don't punch holes in the layout the way the previous github-dark
+// theme did.
+import "highlight.js/styles/atom-one-light.css";
 import "katex/dist/katex.min.css";
 
 import { Voice } from "@/api/client";
@@ -45,11 +50,9 @@ interface MessageRendererProps {
 }
 
 // Mermaid is heavy (~700 kB minified plus per-diagram chunks). We lazy-load
-// it on first use so chats without diagrams pay nothing. The app currently
-// ships a single dark theme (see tailwind.config.js — darkMode is "class"
-// but no runtime toggle exists). When a theme switcher lands, re-initialize
-// on theme change. TODO(theme-toggle): wire mermaid theme to the app theme
-// when a toggle is introduced.
+// it on first use so chats without diagrams pay nothing. The app ships a
+// single cream-light theme (memory/design_direction.md); when a runtime
+// theme toggle lands, re-initialize on theme change.
 type MermaidModule = typeof import("mermaid").default;
 let mermaidPromise: Promise<MermaidModule> | null = null;
 function loadMermaid(): Promise<MermaidModule> {
@@ -57,7 +60,7 @@ function loadMermaid(): Promise<MermaidModule> {
     mermaidPromise = import("mermaid").then((mod) => {
       mod.default.initialize({
         startOnLoad: false,
-        theme: "dark",
+        theme: "neutral",
         securityLevel: "strict",
         fontFamily: "inherit",
       });

@@ -938,6 +938,27 @@ _MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_conversations_team_id ON conversations(team_id)",
         "CREATE INDEX IF NOT EXISTS idx_agent_teams_is_adhoc ON agent_teams(is_adhoc)",
     ]),
+
+    # ── Phase 3 (multi-agent attribution): persist per-step pipeline summaries
+    # so the inline "Researcher contributed…" / "Reviewer signed off…" cards
+    # in chat survive a reload. The orchestrator's _run_team_pipeline writes a
+    # JSON list of {step, agent, task, confidence, validation_passed,
+    # tokens, duration_ms, challenger_signal} entries into this column on the
+    # assistant row; the renderer parses it back out in MessageBubble. NULL
+    # for solo-agent turns and for legacy team turns predating this column.
+    ("pipeline_attribution.1.0", [
+        "ALTER TABLE messages ADD COLUMN pipeline_steps_json TEXT",
+    ]),
+
+    # ── Phase 4 (per-team tool restrictions): union dispatcher input ─────────
+    # Each agent has its own allowed_tools list. A team-scoped allowed_tools
+    # column lets the user further intersect the union at dispatch time —
+    # useful when an ad-hoc team should be locked down even if its members
+    # are otherwise permissive. Stored as JSON-encoded list (matches agents
+    # table). NULL means "no team-level restriction; trust per-agent lists".
+    ("team_allowed_tools.1.0", [
+        "ALTER TABLE agent_teams ADD COLUMN allowed_tools TEXT",
+    ]),
 ]
 
 

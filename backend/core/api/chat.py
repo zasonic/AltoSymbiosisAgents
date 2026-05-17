@@ -168,8 +168,11 @@ class ChatAPI(BaseAPI):
     @_requires("chat_orchestrator", default={"error": "chat unavailable"})
     def chat_set_conversation_roster(
         self, conversation_id: str, agent_ids: list[str],
+        team_id: str | None = None,
     ) -> dict:
-        result = self._chat.update_conversation_roster(conversation_id, agent_ids)
+        result = self._chat.update_conversation_roster(
+            conversation_id, agent_ids, team_id=team_id,
+        )
         return {"ok": True, **result}
 
     @_requires("chat_orchestrator", default={"error": "chat unavailable"})
@@ -196,6 +199,13 @@ class ChatAPI(BaseAPI):
     @_requires("chat_orchestrator", default={})
     def chat_token_stats(self) -> dict:
         return self._chat.get_token_stats()
+
+    @_requires("chat_orchestrator", default={
+        "conversation_id": "", "spent_usd": 0.0,
+        "budget_usd": 0.0, "warn_pct": 0.0,
+    })
+    def chat_conversation_budget(self, conversation_id: str) -> dict:
+        return self._chat.get_conversation_budget(conversation_id)
 
     @_requires("chat_orchestrator", default={})
     def get_router_stats(self) -> dict:

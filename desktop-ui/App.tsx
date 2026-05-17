@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import { Escalation, Memory, Settings, System, resetSidecarInfo } from "@/api/client";
 import { subscribeEvents } from "@/api/sse";
@@ -441,13 +441,22 @@ export function App() {
   }, [sidecarStatus, setPendingMemoryWrites]);
 
   // ── First-run check ────────────────────────────────────────────────────
+  // Settings.first_run_complete is the sole source of truth here (D
+  // carry-over). The renderer no longer mirrors it in localStorage, so
+  // each launch starts with the store default (false) until Settings.get()
+  // resolves. ``firstRunStatusLoaded`` is the gate that hides the wizard
+  // during that async window so users who already completed first run
+  // don't get a flash on every cold start.
+  const [firstRunStatusLoaded, setFirstRunStatusLoaded] = useState(false);
   useEffect(() => {
     if (sidecarStatus?.status !== "ready") return;
+    setFirstRunStatusLoaded(false);
     Settings.get()
       .then((s) => {
         setHasCompletedFirstRun(!!s.first_run_complete);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setFirstRunStatusLoaded(true));
   }, [sidecarStatus, setHasCompletedFirstRun]);
 
   // The first pending escalation drives the modal. New ones queue in
@@ -493,7 +502,7 @@ export function App() {
         </main>
       </div>
 
-      {!hasCompletedFirstRun && sidecarStatus?.status === "ready" && (
+      {!hasCompletedFirstRun && firstRunStatusLoaded && sidecarStatus?.status === "ready" && (
         <FirstRunWizard onComplete={() => setHasCompletedFirstRun(true)} />
       )}
 

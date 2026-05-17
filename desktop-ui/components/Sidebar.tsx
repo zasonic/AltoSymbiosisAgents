@@ -7,22 +7,57 @@ interface NavItem {
   studioOnly?: boolean;
 }
 
-const NAV: NavItem[] = [
-  { id: "chat", label: "Chat", hint: "Talk to your team" },
-  { id: "agents", label: "Agents", hint: "Define agents and teams" },
-  { id: "models", label: "Models", hint: "Browse and switch local models" },
-  { id: "rag", label: "Documents", hint: "Index files and folders" },
-  { id: "memory", label: "Memory", hint: "Search session facts" },
-  { id: "memory_review", label: "Memory Review", hint: "Approve memory writes" },
-  { id: "escalations", label: "Pending Reviews", hint: "Approve paused actions" },
-  { id: "prompts", label: "Prompts", hint: "Manage system prompts", studioOnly: true },
-  { id: "saved_prompts", label: "Saved prompts", hint: "Snippets and system prompt templates" },
-  { id: "mcp", label: "MCP", hint: "Tool servers", studioOnly: true },
-  { id: "security", label: "Security", hint: "Firewall + scan log", studioOnly: true },
-  { id: "safety", label: "Safety", hint: "Escalations, gate, canary, voting" },
-  { id: "usage", label: "Usage", hint: "Token consumption and cost" },
-  { id: "settings", label: "Settings", hint: "API keys, models, routing" },
-  { id: "diagnostics", label: "Diagnostics", hint: "Health + error logs", studioOnly: true },
+interface NavSection {
+  id: string;
+  label: string;
+  items: NavItem[];
+}
+
+// E carry-over: 15 flat items → grouped into four sections so the
+// related controls aren't scattered across the list. "Review queue"
+// gathers everything that gates a pending human decision so the
+// total-badge sum at the section header tells the user at a glance
+// whether anything needs attention.
+const NAV_SECTIONS: NavSection[] = [
+  {
+    id: "workspace",
+    label: "Workspace",
+    items: [
+      { id: "chat",   label: "Chat",   hint: "Talk to your team" },
+      { id: "agents", label: "Agents", hint: "Define agents and teams" },
+      { id: "models", label: "Models", hint: "Browse and switch local models" },
+    ],
+  },
+  {
+    id: "knowledge",
+    label: "Knowledge",
+    items: [
+      { id: "rag",            label: "Documents",     hint: "Index files and folders" },
+      { id: "memory",         label: "Memory",        hint: "Search session facts" },
+      { id: "saved_prompts",  label: "Saved prompts", hint: "Snippets and system prompt templates" },
+      { id: "prompts",        label: "Prompts",       hint: "Manage system prompts", studioOnly: true },
+    ],
+  },
+  {
+    id: "review",
+    label: "Review queue",
+    items: [
+      { id: "memory_review", label: "Memory writes",   hint: "Approve memory writes" },
+      { id: "escalations",   label: "Paused actions",  hint: "Approve paused actions" },
+      { id: "safety",        label: "Safety",          hint: "Escalations, gate, canary, voting" },
+    ],
+  },
+  {
+    id: "system",
+    label: "System",
+    items: [
+      { id: "mcp",         label: "Tool servers", hint: "MCP-managed external tools", studioOnly: true },
+      { id: "security",    label: "Security",     hint: "Firewall + scan log", studioOnly: true },
+      { id: "usage",       label: "Usage",        hint: "Token consumption and cost" },
+      { id: "settings",    label: "Settings",     hint: "API keys, models, routing" },
+      { id: "diagnostics", label: "Diagnostics",  hint: "Health + error logs", studioOnly: true },
+    ],
+  },
 ];
 
 export function Sidebar() {
@@ -32,8 +67,6 @@ export function Sidebar() {
   const setStudio = useAppStore((s) => s.setStudioMode);
   const pendingCount = useAppStore((s) => s.pendingEscalations.length);
   const memoryReviewCount = useAppStore((s) => s.pendingMemoryWrites.length);
-
-  const visible = NAV.filter((n) => studio || !n.studioOnly);
 
   const badgeCount = (id: ActiveView): number => {
     if (id === "escalations") return pendingCount;
@@ -66,30 +99,60 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2 pb-2">
-        {visible.map((item) => {
-          const isActive = active === item.id;
-          const count = badgeCount(item.id);
-          const showBadge = count > 0;
+        {NAV_SECTIONS.map((section, sectionIdx) => {
+          const visibleItems = section.items.filter(
+            (n) => studio || !n.studioOnly,
+          );
+          if (visibleItems.length === 0) return null;
+          const sectionBadge = visibleItems.reduce(
+            (sum, n) => sum + badgeCount(n.id),
+            0,
+          );
           return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setActive(item.id)}
-              aria-label={item.label}
-              aria-current={isActive ? "page" : undefined}
-              className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between rounded-lg my-0.5 transition ${
-                isActive
-                  ? "bg-white text-ink shadow-soft-1"
-                  : "text-ink-dim hover:bg-white/60 hover:text-ink"
-              }`}
+            <div
+              key={section.id}
+              data-testid={`sidebar-section-${section.id}`}
+              className={sectionIdx === 0 ? "" : "mt-3 pt-3 border-t border-line/40"}
             >
-              <span className="font-medium">{item.label}</span>
-              {showBadge && (
-                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-medium rounded-full bg-accent/20 text-ink">
-                  {count}
-                </span>
-              )}
-            </button>
+              <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-wider text-ink-faint flex items-center justify-between">
+                <span>{section.label}</span>
+                {sectionBadge > 0 && (
+                  <span
+                    className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-1 text-[10px] font-medium rounded-full bg-accent/20 text-ink"
+                    data-testid={`sidebar-section-badge-${section.id}`}
+                  >
+                    {sectionBadge}
+                  </span>
+                )}
+              </div>
+              {visibleItems.map((item) => {
+                const isActive = active === item.id;
+                const count = badgeCount(item.id);
+                const showBadge = count > 0;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setActive(item.id)}
+                    aria-label={item.label}
+                    aria-current={isActive ? "page" : undefined}
+                    title={item.hint}
+                    className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between rounded-lg my-0.5 transition ${
+                      isActive
+                        ? "bg-white text-ink shadow-soft-1"
+                        : "text-ink-dim hover:bg-white/60 hover:text-ink"
+                    }`}
+                  >
+                    <span className="font-medium">{item.label}</span>
+                    {showBadge && (
+                      <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-medium rounded-full bg-accent/20 text-ink">
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           );
         })}
       </nav>

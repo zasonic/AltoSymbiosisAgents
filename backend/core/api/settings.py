@@ -276,6 +276,25 @@ class SettingsAPI(BaseAPI):
             else:
                 entry["value"] = raw_current
 
+            # Phase 4: dynamic enum options for fields whose option list comes
+            # from a live data source (currently just the agents catalog).
+            # Done here rather than at module load so renaming an agent shows
+            # up on the next manifest refresh without restarting the sidecar.
+            if key == "default_agent_id":
+                try:
+                    from services.agent_registry import list_agents
+                    agents = list_agents() or []
+                    entry["options"] = [
+                        {"value": "", "label": "— Smart routing (no default agent) —"},
+                    ] + [
+                        {"value": a["id"], "label": a.get("name") or a["id"]}
+                        for a in agents
+                    ]
+                except Exception:
+                    # Fall back to the static placeholder option from
+                    # FIELD_METADATA so the field still renders.
+                    pass
+
             fields[key] = entry
 
         return {
