@@ -39,9 +39,12 @@ vi.mock("@/api/client", () => ({
     list: vi.fn(),
     use: vi.fn(),
   },
+  Models: {
+    catalog: vi.fn(),
+  },
 }));
 
-import { Attachments, Chat, PromptTemplates, Settings, Voice } from "@/api/client";
+import { Attachments, Chat, Models, PromptTemplates, Settings, Voice } from "@/api/client";
 
 // jsdom doesn't ship ResizeObserver but the virtualized message list
 // instantiates one. A no-op stand-in is enough — the export menu doesn't
@@ -113,6 +116,7 @@ beforeEach(() => {
   vi.mocked(PromptTemplates.list).mockReset();
   vi.mocked(PromptTemplates.list).mockResolvedValue([]);
   vi.mocked(PromptTemplates.use).mockReset();
+  vi.mocked(Models.catalog).mockResolvedValue({ default_claude_id: "", models: [] });
   // jsdom doesn't ship URL.createObjectURL — the image chip renders a
   // <img src=…> from one. Stub it (and the matching revoke) so the chip
   // mounts cleanly under test.

@@ -17,6 +17,7 @@ import {
 import {
   Attachments,
   Chat,
+  Models,
   PromptTemplates,
   Settings,
   Voice,
@@ -67,6 +68,11 @@ function _isImageMime(t: string | undefined | null): boolean {
 
 function _isImageAttachment(a: Attachment): boolean {
   return _isImageMime(a.mime_type);
+}
+
+// cl100k_base averages ~4 chars/token for English; good enough for a live hint.
+function estimateTokens(text: string): number {
+  return text.length === 0 ? 0 : Math.max(1, Math.ceil(text.length / 4));
 }
 
 export function ChatView() {
@@ -121,6 +127,8 @@ export function ChatView() {
   // cleanup effects below.
   const [sendPhase, setSendPhase] = useState<"idle" | "chat">("idle");
   const [loadError, setLoadError] = useState<string>("");
+  // Token counter: input price for the active Claude model, null when local/smart-routing.
+  const [inputPricePerMtok, setInputPricePerMtok] = useState<number | null>(null);
 
   // PR 13: cross-conversation FTS5 search. ``searchQuery`` is the raw
   // input value; ``searchResults`` is the latest server response.
@@ -143,15 +151,21 @@ export function ChatView() {
   const composingRef = useRef(false);
   const ready = status?.status === "ready";
 
-  // Seed the voice toggles from the sidecar on first ready.
+  // Seed the voice toggles and active-model pricing from the sidecar on first ready.
   useEffect(() => {
     if (!ready) return;
     let alive = true;
-    Settings.get()
-      .then((s) => {
+    Promise.all([Settings.get(), Models.catalog()])
+      .then(([s, catalog]) => {
         if (!alive) return;
         setVoiceInputEnabled(!!s.voice_input_enabled);
         setVoiceOutputEnabled(!!s.voice_output_enabled);
+        if (!s.routing_enabled && s.claude_model) {
+          const entry = catalog.models.find((m) => m.id === s.claude_model);
+          setInputPricePerMtok(entry?.input_price_per_mtok ?? null);
+        } else {
+          setInputPricePerMtok(null);
+        }
       })
       .catch(() => {});
     return () => {
@@ -159,17 +173,21 @@ export function ChatView() {
     };
   }, [ready]);
 
-  // PR 17: re-sync the voice toggle whenever the user flips it elsewhere.
-  // SettingsPanel writes the same setting; we listen for the focus event
-  // rather than poll because the SSE stream doesn't surface settings
-  // changes today.
+  // Re-sync voice toggles and active-model pricing when the window regains focus
+  // (user may have changed settings in another panel).
   useEffect(() => {
     if (!ready) return;
     const onFocus = () => {
-      Settings.get()
-        .then((s) => {
+      Promise.all([Settings.get(), Models.catalog()])
+        .then(([s, catalog]) => {
           setVoiceInputEnabled(!!s.voice_input_enabled);
           setVoiceOutputEnabled(!!s.voice_output_enabled);
+          if (!s.routing_enabled && s.claude_model) {
+            const entry = catalog.models.find((m) => m.id === s.claude_model);
+            setInputPricePerMtok(entry?.input_price_per_mtok ?? null);
+          } else {
+            setInputPricePerMtok(null);
+          }
         })
         .catch(() => {});
     };
@@ -673,6 +691,8 @@ export function ChatView() {
       .slice(0, 8);
   }, [slashQuery, promptTemplates]);
 
+  const tokenCount = useMemo(() => estimateTokens(input), [input]);
+
   // Reset the highlighted row whenever the filtered set changes so we don't
   // point past the end of the visible list.
   useEffect(() => {
@@ -1135,6 +1155,14 @@ export function ChatView() {
               </button>
             )}
           </div>
+          {tokenCount > 0 && (
+            <div className="mt-1 text-right text-[11px] text-ink-faint tabular-nums select-none">
+              ~{tokenCount.toLocaleString()} tok
+              {inputPricePerMtok !== null && (
+                <> · ${((inputPricePerMtok * tokenCount) / 1_000_000).toFixed(4)}</>
+              )}
+            </div>
+          )}
         </div>
         {dragActive && activeId && (
           <div
