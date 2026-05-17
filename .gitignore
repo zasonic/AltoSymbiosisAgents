@@ -32,3 +32,6 @@ branding/sidecar-bundle/
 # Local logs
 *.log
 
+# Claude Code per-machine settings (settings.local.json holds personal
+# permission allowlists and IDE state; never team-shared).
+.claude/
