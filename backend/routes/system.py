@@ -143,9 +143,15 @@ async def canary_reset(model_id: str, request: Request) -> dict:
 async def local_models(request: Request) -> dict:
     api = get_api(request)
     client = api.local_client
-    models = client.list_local_models() if client is not None else []
     current = api._settings.get("default_local_model", "") or ""
-    return {"models": models, "current": current}
+    if client is None:
+        return {"models": [], "current": current, "sources": []}
+    payload = client.list_local_sources()
+    return {
+        "models":  payload["models"],
+        "sources": payload["sources"],
+        "current": current,
+    }
 
 
 @router.post("/local_model/active")

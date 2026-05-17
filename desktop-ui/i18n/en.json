@@ -16,6 +16,7 @@
   "semantic_search_indexer": "Semantic Search Indexer",
   "ollama": "Ollama",
   "lm_studio": "LM Studio",
+  "bundled": "Bundled",
   "safety.title": "Safety",
   "safety.subtitle": "How the system protected your sessions in the selected window.",
   "safety.window.7": "Last 7 days",

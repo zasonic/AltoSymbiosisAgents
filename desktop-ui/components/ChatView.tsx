@@ -29,6 +29,7 @@ import { t } from "@/i18n";
 import { MessageBubble, type MessageRow } from "@/components/chat/MessageBubble";
 import { MessageRenderer } from "@/components/MessageRenderer";
 import { MessageErrorBoundary } from "@/components/MessageErrorBoundary";
+import { ModelSwitcher } from "@/components/ModelSwitcher";
 import { useAppStore } from "@/stores/appStore";
 
 interface ConversationRow {
@@ -928,10 +929,11 @@ export function ChatView() {
         data-testid="chat-drop-target"
       >
         {activeId && (
-          <div className="flex items-center justify-between border-b border-line bg-bg-1 px-4 py-2">
-            <div className="text-sm font-medium text-ink truncate">
+          <div className="flex items-center gap-3 border-b border-line bg-bg-1 px-4 py-2">
+            <div className="text-sm font-medium text-ink truncate flex-1 min-w-0">
               {activeConversation?.title || "Untitled"}
             </div>
+            <ModelSwitcher />
             <ExportMenu
               conversationId={activeId}
               conversationTitle={activeConversation?.title || "conversation"}
@@ -964,7 +966,7 @@ export function ChatView() {
           )}
         </div>
 
-        <div className="border-t border-line p-3">
+        <div className="p-3 pt-4">
           <AttachmentChips
             attachments={pendingAttachments[activeId] ?? []}
             onRemove={removeAttachment}

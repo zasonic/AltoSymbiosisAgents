@@ -8,13 +8,25 @@
   }
   body {
     margin: 0;
-    background: theme(colors.bg.DEFAULT);
     color: theme(colors.ink.DEFAULT);
     font-family: theme(fontFamily.sans);
     font-size: 14px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
+
+    /* Rising-glow gradient: a strong lavender swell anchored under the
+       chat composer (bottom-center), with peach + mint flanks at the
+       bottom corners and a faint lavender hint at the top to balance.
+       Cream fades upward, so the eye reads the chat input as the source
+       of the room's warmth — power rising from where you act. */
+    background-color: theme(colors.bg.DEFAULT);
+    background-image:
+      radial-gradient(ellipse 70% 55% at 55% 100%, rgba(180,167,245,0.32) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 35% at 92% 92%, rgba(244,184,168,0.22) 0%, transparent 55%),
+      radial-gradient(ellipse 35% 30% at 22% 95%, rgba(168,224,200,0.18) 0%, transparent 55%),
+      radial-gradient(ellipse 60% 25% at 50% 0%,  rgba(196,184,255,0.08) 0%, transparent 60%);
+    background-attachment: fixed;
   }
   ::-webkit-scrollbar {
     width: 8px;
@@ -33,36 +45,55 @@
 }
 
 @layer components {
+  /* Frosted glass — for modals, dropdowns, floating docks. The mesh
+     gradient bleeds through and gives the element a sense of place. */
   .glass {
-    @apply bg-bg-2/60 backdrop-blur border border-line/50 rounded-xl;
+    @apply bg-white/70 backdrop-blur-xl backdrop-saturate-150
+           rounded-2xl shadow-glass;
   }
+
   .btn {
     @apply inline-flex items-center justify-center gap-1.5 rounded-lg
            px-3 py-1.5 text-sm font-medium transition
-           focus:outline-none focus:ring-1 focus:ring-accent;
+           focus:outline-none focus:ring-2 focus:ring-accent/40;
   }
+  /* Primary: vertical light-to-dark wash + accent glow on hover.
+     Mimics how light hits a soft pill — tactile, not flat. */
   .btn-primary {
-    @apply btn bg-accent text-white hover:bg-accent-dark;
+    @apply btn text-white shadow-soft-1
+           bg-gradient-to-b from-accent to-accent-dark
+           hover:shadow-accent-glow;
   }
   .btn-ghost {
     @apply btn text-ink-dim hover:text-ink hover:bg-bg-2;
   }
   .btn-danger {
-    @apply btn bg-err/15 text-err hover:bg-err/25;
+    @apply btn bg-err/20 text-ink hover:bg-err/30 shadow-soft-1;
   }
+  /* New secondary variant for two-action forms (Cancel / Save etc.) */
+  .btn-secondary {
+    @apply btn bg-bg-1 text-ink shadow-soft-1 hover:shadow-soft-2;
+  }
+
+  /* Inputs sink into the page via inset shadow; focus blooms with the
+     accent glow. No borders anywhere. */
   .input {
-    @apply w-full rounded-lg bg-bg-2 border border-line px-3 py-2
-           text-sm placeholder:text-ink-faint
-           focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent;
+    @apply w-full rounded-lg bg-bg-1 px-3 py-2
+           text-sm placeholder:text-ink-faint shadow-soft-inset
+           focus:outline-none focus:shadow-accent-glow;
   }
   .label {
-    @apply block text-xs font-semibold text-ink-dim uppercase tracking-wide mb-1;
+    @apply block text-xs font-semibold text-ink-dim mb-1;
   }
+  /* Cards float on the cream page; lift slightly on hover. */
   .card {
-    @apply bg-bg-1 border border-line rounded-xl p-4;
+    @apply bg-bg-1 rounded-xl p-4 shadow-soft-1 transition-shadow;
+  }
+  .card:hover {
+    @apply shadow-soft-2;
   }
   .pill {
-    @apply inline-flex items-center gap-1 rounded-full bg-bg-2 border border-line
+    @apply inline-flex items-center gap-1 rounded-full bg-bg-2
            px-2 py-0.5 text-xs text-ink-dim;
   }
 }

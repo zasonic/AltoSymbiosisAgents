@@ -25,6 +25,41 @@ log = logging.getLogger("altosybioagents.local")
 
 _FALLBACK = "[Local model unavailable — no response]"
 
+# Common GGUF quantisation tags. We surface the tag in the model browser so
+# users can tell q4 from q8 without parsing filenames themselves. Matched
+# case-insensitively against the filename stem.
+_QUANT_RE = re.compile(
+    r"(q\d_(?:k|0|1)(?:_[a-z])?|q\d+|iq\d_(?:s|m|l|xs|xss|xxs|nl)|f16|fp16|bf16|f32|fp32)",
+    re.IGNORECASE,
+)
+
+
+def _quant_from_filename(name: str) -> str | None:
+    """Extract a quantisation tag from a GGUF filename, if present.
+
+    Example: ``"Qwen2.5-7B-Instruct-Q4_K_M.gguf" -> "q4_k_m"``. Returns
+    ``None`` when no recognised tag is found.
+    """
+    m = _QUANT_RE.search(name)
+    return m.group(0).lower() if m else None
+
+
+def _short_error(exc: BaseException) -> str:
+    """Render an exception as a short, user-readable string for status badges.
+
+    Strips the long stack-trace context; collapses ``ConnectionRefusedError``
+    into a friendlier phrasing so the empty-state hint reads as guidance
+    rather than a stack trace.
+    """
+    name = type(exc).__name__
+    if any(s in name for s in ("ConnectionError", "ConnectionRefused", "NewConnectionError")):
+        return "Not reachable"
+    if "Timeout" in name:
+        return "Timed out"
+    msg = str(exc) or name
+    # Cap to keep status pills compact.
+    return msg if len(msg) <= 120 else msg[:117] + "…"
+
 # QLPT Stage 1: Ollama added native logprobs to /api/chat in v0.12.11
 # (Nov 2025). The /v1/chat/completions compatibility layer still drops
 # the field — see ollama/ollama#16117. When the unified path needs
@@ -155,56 +190,184 @@ class LocalClient(LLMClient):
             return []
 
     def list_local_models(self) -> list[dict]:
-        """Return installed local models across both Ollama and LM Studio.
+        """Return installed local models across all configured local backends.
 
-        Each row carries enough info for a model browser UI:
+        Backward-compatible: callers that only need the flat row list still
+        work. New callers should prefer ``list_local_sources()`` which also
+        returns per-backend reachability so the UI can show *why* a backend
+        contributed zero rows.
+        """
+        return self.list_local_sources()["models"]
+
+    def list_local_sources(self) -> dict:
+        """Return local models plus per-backend probe status.
+
+        Shape::
+
+            {
+              "models":  [LocalModelRow, ...],
+              "sources": [
+                {"backend": "ollama",    "url": "...", "ok": bool,
+                 "error": str|None, "count": int},
+                {"backend": "lm_studio", ...},
+                {"backend": "bundled",   "url": str|None, "ok": bool,
+                 "error": str|None, "count": int},
+              ],
+            }
+
+        Each ``LocalModelRow`` is::
+
             {"id": str, "size_bytes": int|None, "context_length": int|None,
-             "quantization": str|None, "backend": "ollama"|"lm_studio",
+             "quantization": str|None,
+             "backend": "ollama"|"lm_studio"|"bundled",
              "loaded": bool}
 
-        Backends that are unreachable contribute zero rows; failures are
-        logged at warning level and never raise.
+        Ollama and LM Studio probes run in parallel so the slow case
+        (both backends unreachable) costs one timeout instead of two.
+        The bundled-models scan reads the filesystem and is essentially
+        free, so it runs inline.
         """
+        from concurrent.futures import ThreadPoolExecutor
+
         active = self._settings.get("default_local_model", "") or ""
-        out: list[dict] = []
+        # Clamp to a sensible range so a corrupt settings value can't hang
+        # the UI for minutes or shorten the probe below what loopback needs.
+        try:
+            timeout = float(self._settings.get("local_probe_timeout_sec", 2.0))
+        except (TypeError, ValueError):
+            timeout = 2.0
+        timeout = max(0.5, min(timeout, 30.0))
 
         ollama_url = self._settings.get("ollama_url", "http://localhost:11434")
+        lm_url = self._settings.get("lm_studio_url", "http://localhost:1234")
+
+        # Probe both HTTP backends in parallel — total wait time is bounded
+        # by the slowest probe rather than the sum of both.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_ollama = pool.submit(self._probe_ollama, ollama_url, timeout, active)
+            f_lm = pool.submit(self._probe_lm_studio, lm_url, timeout, active)
+            ollama_models, ollama_err = f_ollama.result()
+            lm_models, lm_err = f_lm.result()
+
+        bundled_models, bundled_err, bundled_url = self._scan_bundled(active)
+
+        return {
+            "models": [*ollama_models, *lm_models, *bundled_models],
+            "sources": [
+                {
+                    "backend": "ollama",
+                    "url":     ollama_url,
+                    "ok":      ollama_err is None,
+                    "error":   ollama_err,
+                    "count":   len(ollama_models),
+                },
+                {
+                    "backend": "lm_studio",
+                    "url":     lm_url,
+                    "ok":      lm_err is None,
+                    "error":   lm_err,
+                    "count":   len(lm_models),
+                },
+                {
+                    "backend": "bundled",
+                    "url":     bundled_url,
+                    "ok":      bundled_err is None,
+                    "error":   bundled_err,
+                    "count":   len(bundled_models),
+                },
+            ],
+        }
+
+    @staticmethod
+    def _probe_ollama(url: str, timeout: float, active: str) -> tuple[list[dict], str | None]:
+        """Return (rows, error). error is None on success; a short human
+        string otherwise so the UI can surface it inline."""
         try:
-            r = requests.get(ollama_url + "/api/tags", timeout=5)
+            r = requests.get(url + "/api/tags", timeout=timeout)
             r.raise_for_status()
-            for m in r.json().get("models", []) or []:
-                details = m.get("details") or {}
-                mid = m.get("name", "")
-                out.append({
-                    "id":             mid,
-                    "size_bytes":     m.get("size"),
-                    "context_length": None,
-                    "quantization":   details.get("quantization_level") or None,
-                    "backend":        "ollama",
-                    "loaded":         bool(mid) and mid == active,
-                })
         except Exception as exc:
             log.warning("list_local_models: ollama probe failed: %s", exc)
+            return [], _short_error(exc)
+        rows: list[dict] = []
+        for m in r.json().get("models", []) or []:
+            details = m.get("details") or {}
+            mid = m.get("name", "")
+            rows.append({
+                "id":             mid,
+                "size_bytes":     m.get("size"),
+                "context_length": None,
+                "quantization":   details.get("quantization_level") or None,
+                "backend":        "ollama",
+                "loaded":         bool(mid) and mid == active,
+            })
+        return rows, None
 
-        lm_url = self._settings.get("lm_studio_url", "http://localhost:1234")
+    @staticmethod
+    def _probe_lm_studio(url: str, timeout: float, active: str) -> tuple[list[dict], str | None]:
         try:
-            r = requests.get(lm_url + "/v1/models", timeout=5)
+            r = requests.get(url + "/v1/models", timeout=timeout)
             r.raise_for_status()
-            for m in r.json().get("data", []) or []:
-                mid = m.get("id", "")
-                ctx = m.get("context_length") or m.get("max_context_length")
-                out.append({
-                    "id":             mid,
-                    "size_bytes":     m.get("size") if isinstance(m.get("size"), int) else None,
-                    "context_length": ctx if isinstance(ctx, int) else None,
-                    "quantization":   m.get("quantization") or None,
-                    "backend":        "lm_studio",
-                    "loaded":         bool(mid) and mid == active,
-                })
         except Exception as exc:
             log.warning("list_local_models: lm_studio probe failed: %s", exc)
+            return [], _short_error(exc)
+        rows: list[dict] = []
+        for m in r.json().get("data", []) or []:
+            mid = m.get("id", "")
+            ctx = m.get("context_length") or m.get("max_context_length")
+            rows.append({
+                "id":             mid,
+                "size_bytes":     m.get("size") if isinstance(m.get("size"), int) else None,
+                "context_length": ctx if isinstance(ctx, int) else None,
+                "quantization":   m.get("quantization") or None,
+                "backend":        "lm_studio",
+                "loaded":         bool(mid) and mid == active,
+            })
+        return rows, None
 
-        return out
+    def _scan_bundled(self, active: str) -> tuple[list[dict], str | None, str | None]:
+        """Scan the bundled-models directory for GGUF files.
+
+        Returns (rows, error, url). ``url`` describes the bundled server
+        endpoint (or the on-disk path when the server isn't running) so the
+        UI can show users where the bundled models came from. The bundled
+        downloader stages files into ``paths.bundled_models_dir()``; until
+        this scan existed, those files never appeared in the model list
+        even after a successful download.
+        """
+        rows: list[dict] = []
+        try:
+            from core import paths as _paths
+            models_dir = _paths.bundled_models_dir()
+        except Exception as exc:  # noqa: BLE001
+            return rows, _short_error(exc), None
+
+        # The "url" we report for the bundled source is the live llama-server
+        # endpoint when it's running, else the on-disk path. Both are useful
+        # for the UI's "where did this come from?" hint.
+        port = self._bundled_port()
+        url = f"http://127.0.0.1:{port}" if port else str(models_dir)
+
+        try:
+            gguf_files = sorted(models_dir.glob("*.gguf"))
+        except Exception as exc:  # noqa: BLE001
+            return rows, _short_error(exc), url
+
+        for path in gguf_files:
+            try:
+                size = path.stat().st_size
+            except OSError:
+                size = None
+            mid = path.stem
+            rows.append({
+                "id":             mid,
+                "size_bytes":     size,
+                "context_length": None,
+                "quantization":   _quant_from_filename(path.name),
+                "backend":        "bundled",
+                "loaded":         bool(mid) and mid == active,
+            })
+
+        return rows, None, url
 
     def list_models_detailed(self, backend: str | None = None) -> list[dict]:
         """Return available models as list of {id, raw} dicts.

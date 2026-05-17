@@ -226,6 +226,63 @@ class SettingsAPI(BaseAPI):
         self._settings.set("model_prices", clean)
         return {"ok": True, "prices": clean}
 
+    def manifest(self) -> dict:
+        """Return the settings manifest used by the generated Settings UI.
+
+        Combines static field metadata (label / type / group / options /
+        validation hints) with each field's current value and "is this the
+        default?" flag. Secret values are never returned in clear — only a
+        ``is_set`` boolean and a masked preview.
+
+        Fields absent from FIELD_METADATA still exist in SETTINGS_DEFAULTS and
+        can be read/written via the standard /api/settings endpoints; they're
+        just not part of the manifest-driven UI yet.
+        """
+        from core.settings import (
+            FIELD_METADATA,
+            GROUPS_META,
+            SETTINGS_DEFAULTS,
+            is_secret_key,
+        )
+
+        fields: dict[str, dict] = {}
+        for key, meta in FIELD_METADATA.items():
+            if key not in SETTINGS_DEFAULTS:
+                # Metadata for a key that was removed from the schema. Skip
+                # silently rather than crashing the whole manifest fetch.
+                continue
+            expected_type, default_value = SETTINGS_DEFAULTS[key]
+            raw_current = self._settings.get(key, default_value)
+
+            type_name = (
+                "|".join(t.__name__ for t in expected_type if t is not type(None))
+                if isinstance(expected_type, tuple)
+                else expected_type.__name__
+            )
+
+            entry: dict[str, Any] = {
+                **meta,
+                "key":          key,
+                "value_type":   type_name,
+                "default":      default_value,
+                "is_default":   raw_current == default_value,
+            }
+
+            if is_secret_key(key):
+                # Never return the secret value itself. Mask preview + boolean.
+                entry["is_set"] = bool(raw_current)
+                entry["preview"] = _mask_secret(raw_current or "")
+            else:
+                entry["value"] = raw_current
+
+            fields[key] = entry
+
+        return {
+            "version": 1,
+            "groups":  list(GROUPS_META),
+            "fields":  fields,
+        }
+
     def studio_mode_get(self) -> dict:
         """Return current studio mode state."""
         return {"enabled": bool(self._settings.get("studio_mode", False))}

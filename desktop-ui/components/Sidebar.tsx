@@ -42,22 +42,30 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="flex flex-col w-56 min-w-56 border-r border-line bg-bg-1">
-      <div className="px-4 py-4 border-b border-line">
-        <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-accent to-claude flex items-center justify-center text-white font-bold">
-            ai
-          </div>
+    <aside className="flex flex-col w-56 min-w-56 bg-gradient-to-b from-white to-bg-2/60">
+      <div className="px-4 py-5">
+        <div className="flex items-center gap-3">
+          {/* Soft sunrise mark — lavender → blush → peach, no letters */}
+          <div
+            className="h-9 w-9 rounded-2xl shadow-soft-2"
+            style={{
+              backgroundImage:
+                "linear-gradient(135deg, #c4b8ff 0%, #e8d4f0 55%, #f4c8b8 100%)",
+            }}
+            aria-hidden
+          />
           <div className="leading-tight">
-            <div className="text-sm font-semibold">altosybioagents</div>
-            <div className="text-[10px] uppercase tracking-wide text-ink-faint">
-              Local-first
+            <div className="text-[15px] font-semibold tracking-tight">
+              alto
+            </div>
+            <div className="text-[11px] text-ink-faint -mt-0.5">
+              symbiosis
             </div>
           </div>
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-2">
+      <nav className="flex-1 overflow-y-auto px-2 pb-2">
         {visible.map((item) => {
           const isActive = active === item.id;
           const count = badgeCount(item.id);
@@ -69,39 +77,36 @@ export function Sidebar() {
               onClick={() => setActive(item.id)}
               aria-label={item.label}
               aria-current={isActive ? "page" : undefined}
-              className={`w-full text-left px-4 py-2 text-sm flex flex-col rounded-md mx-2 my-0.5 transition ${
+              className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between rounded-lg my-0.5 transition ${
                 isActive
-                  ? "bg-accent/10 text-ink"
-                  : "text-ink-dim hover:bg-bg-2 hover:text-ink"
+                  ? "bg-white text-ink shadow-soft-1"
+                  : "text-ink-dim hover:bg-white/60 hover:text-ink"
               }`}
             >
-              <span className="font-medium flex items-center gap-2">
-                {item.label}
-                {showBadge && (
-                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] rounded-full bg-warn/20 text-warn">
-                    {count}
-                  </span>
-                )}
-              </span>
-              <span className="text-[11px] text-ink-faint">{item.hint}</span>
+              <span className="font-medium">{item.label}</span>
+              {showBadge && (
+                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-medium rounded-full bg-accent/20 text-ink">
+                  {count}
+                </span>
+              )}
             </button>
           );
         })}
       </nav>
 
-      <div className="border-t border-line px-4 py-3 flex items-center justify-between text-xs text-ink-dim">
+      <div className="px-4 py-3 flex items-center justify-between text-xs text-ink-dim">
         <span>Studio mode</span>
         <button
           type="button"
           onClick={() => setStudio(!studio)}
-          className={`h-5 w-9 rounded-full transition relative ${
+          className={`h-5 w-9 rounded-full transition relative shadow-soft-inset ${
             studio ? "bg-accent" : "bg-bg-3"
           }`}
           aria-pressed={studio}
           aria-label="Toggle studio mode"
         >
           <span
-            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-soft-1 transition-all ${
               studio ? "left-4" : "left-0.5"
             }`}
           />

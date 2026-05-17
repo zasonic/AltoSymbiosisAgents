@@ -182,8 +182,64 @@ export interface SettingsPayload {
   tts_voice_id: string;
 }
 
+// ── Settings manifest ─────────────────────────────────────────────────────
+// Static field metadata + current values, served from /api/settings/manifest.
+// Drives the generated Settings UI; absent fields still work via the old
+// /api/settings endpoints. Add a new field by editing FIELD_METADATA in
+// backend/core/settings.py — no frontend change required.
+
+export type ManifestFieldType =
+  | "string"
+  | "url"
+  | "int"
+  | "float"
+  | "bool"
+  | "enum"
+  | "secret";
+
+export interface ManifestEnumOption {
+  value: string;
+  label: string;
+}
+
+export interface ManifestField {
+  key: string;
+  label: string;
+  description?: string;
+  type: ManifestFieldType;
+  group: string;
+  value_type: string;
+  default: unknown;
+  is_default: boolean;
+  placeholder?: string;
+  unit?: string;
+  min?: number;
+  max?: number;
+  options?: ManifestEnumOption[];
+  verify_endpoint?: string;
+  read_only?: boolean;
+  // Present when type === "secret":
+  is_set?: boolean;
+  preview?: string;
+  // Present when type !== "secret":
+  value?: unknown;
+}
+
+export interface ManifestGroup {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface SettingsManifest {
+  version: number;
+  groups: ManifestGroup[];
+  fields: Record<string, ManifestField>;
+}
+
 export const Settings = {
   get: () => api.get<SettingsPayload>("/api/settings"),
+  manifest: () => api.get<SettingsManifest>("/api/settings/manifest"),
   save: (key: string, value: unknown) =>
     api.post<{ ok: true }>("/api/settings/save", { key, value }),
   set: (key: string, value: unknown) =>
@@ -543,18 +599,31 @@ export const updatePromptTemplate = PromptTemplates.update;
 export const deletePromptTemplate = PromptTemplates.delete;
 export const usePromptTemplate = PromptTemplates.use;
 
+export type LocalBackend = "ollama" | "lm_studio" | "bundled";
+
 export interface LocalModelRow {
   id: string;
   size_bytes: number | null;
   context_length: number | null;
   quantization: string | null;
-  backend: "ollama" | "lm_studio";
+  backend: LocalBackend;
   loaded: boolean;
+}
+
+export interface LocalModelSource {
+  backend: LocalBackend;
+  url: string | null;
+  ok: boolean;
+  error: string | null;
+  count: number;
 }
 
 export interface LocalModelsResponse {
   models: LocalModelRow[];
   current: string;
+  // New in the per-backend rewrite. Older sidecars may omit this field;
+  // callers should default to [] when absent.
+  sources?: LocalModelSource[];
 }
 
 export const System = {

@@ -91,6 +91,12 @@ SETTINGS_DEFAULTS: dict[str, tuple] = {
     "ollama_url":                  (str,   "http://localhost:11434"),
     "lm_studio_url":               (str,   "http://localhost:1234"),
     "default_local_backend":       (str,   "ollama"),
+    # How long the model-listing probes wait for each local backend before
+    # giving up. Two seconds is plenty for a localhost connect — a real
+    # connection-refused fails in <50ms; anything longer means the daemon
+    # is hung and the user doesn't want to keep waiting. Surfaced in the
+    # settings manifest so users can lengthen it on slow/remote setups.
+    "local_probe_timeout_sec":     (float, 2.0),
 
     # Phase 9: Bundled llama.cpp server.
     # local_backend_mode picks which local stack the LocalClient routes to:
@@ -476,3 +482,131 @@ class Settings:
                 type_name = expected_type.__name__
             out[key] = {"type": type_name, "default": default_value}
         return out
+
+
+# ── Field metadata for the settings manifest ─────────────────────────────────
+# Populate one entry per key that the UI needs to render as a real form field.
+# Keys absent from this table still exist in SETTINGS_DEFAULTS and can be
+# read/written via the existing /api/settings endpoints — they just don't
+# appear in the manifest-driven UI yet. Adding a row here is the only step
+# needed to surface a new setting in the generated Settings UI.
+#
+# Recognised field-level keys:
+#   label          — short human label (sentence case)
+#   description    — one-line explanation, used as form help text
+#   type           — "string" | "url" | "int" | "float" | "bool" | "enum" | "secret"
+#   group          — id of a GROUPS_META entry
+#   placeholder    — input placeholder (optional)
+#   unit           — display unit, e.g. "seconds", "USD", "%" (optional)
+#   min / max      — numeric bounds for int/float (optional)
+#   options        — list[{value, label}] for enum (required when type=="enum")
+#   verify_endpoint— path of a POST route that can validate the value (optional)
+#   read_only      — when True, UI shows but does not edit (optional)
+FIELD_METADATA: dict[str, dict] = {
+    # ── Claude API ──────────────────────────────────────────────────────────
+    "claude_api_key": {
+        "label":           "Anthropic API key",
+        "description":     "Get a key at console.anthropic.com. Stored in your OS keyring.",
+        "type":            "secret",
+        "group":           "api",
+        "placeholder":     "sk-ant-…",
+        "verify_endpoint": "/api/settings/verify_api_key",
+    },
+    "claude_model": {
+        "label":       "Default Claude model",
+        "description": "Used when the router escalates from a local model to Claude.",
+        "type":        "string",
+        "group":       "api",
+    },
+    "claude_prompt_caching": {
+        "label":       "Anthropic prompt caching",
+        "description": "Cache long prompt prefixes to cut latency and cost on repeat turns.",
+        "type":        "bool",
+        "group":       "api",
+    },
+
+    # ── Local models ────────────────────────────────────────────────────────
+    "local_backend_mode": {
+        "label":       "Local backend mode",
+        "description": "Which local model stack the router uses.",
+        "type":        "enum",
+        "group":       "local_models",
+        "options": [
+            {"value": "auto",      "label": "Auto (probe Ollama, then LM Studio)"},
+            {"value": "ollama",    "label": "Ollama only"},
+            {"value": "lm_studio", "label": "LM Studio only"},
+            {"value": "bundled",   "label": "Bundled llama.cpp"},
+        ],
+    },
+    "ollama_url": {
+        "label":       "Ollama URL",
+        "description": "HTTP endpoint for the Ollama daemon.",
+        "type":        "url",
+        "group":       "local_models",
+        "placeholder": "http://localhost:11434",
+    },
+    "lm_studio_url": {
+        "label":       "LM Studio URL",
+        "description": "HTTP endpoint for the LM Studio server.",
+        "type":        "url",
+        "group":       "local_models",
+        "placeholder": "http://localhost:1234",
+    },
+    "local_probe_timeout_sec": {
+        "label":       "Local probe timeout",
+        "description": "How long to wait for each local backend when listing models.",
+        "type":        "float",
+        "group":       "local_models",
+        "unit":        "seconds",
+        "min":         0.5,
+        "max":         30.0,
+    },
+    "default_local_model": {
+        "label":       "Active local model",
+        "description": "Model id the router uses when it picks the local backend.",
+        "type":        "string",
+        "group":       "local_models",
+    },
+    "bundled_model_id": {
+        "label":       "Bundled model",
+        "description": "GGUF model id managed by the bundled llama.cpp server.",
+        "type":        "string",
+        "group":       "local_models",
+        "read_only":   True,
+    },
+
+    # ── Token budget & cost ─────────────────────────────────────────────────
+    "max_conversation_budget_usd": {
+        "label":       "Per-conversation budget",
+        "description": "Stop sending new turns once cumulative cost exceeds this.",
+        "type":        "float",
+        "group":       "budget",
+        "unit":        "USD",
+        "min":         0.0,
+    },
+    "budget_warning_threshold_pct": {
+        "label":       "Budget warning threshold",
+        "description": "Warn when usage exceeds this fraction of the budget.",
+        "type":        "float",
+        "group":       "budget",
+        "unit":        "%",
+        "min":         0.0,
+        "max":         100.0,
+    },
+}
+
+
+# Ordered list of group definitions for the manifest UI.
+GROUPS_META: list[dict] = [
+    {"id": "api",          "label": "Claude API",
+     "description": "Authentication and default model for cloud inference."},
+    {"id": "local_models", "label": "Local models",
+     "description": "Where to find Ollama, LM Studio, and the bundled llama.cpp server."},
+    {"id": "budget",       "label": "Token budget & cost",
+     "description": "Per-conversation spending controls."},
+]
+
+
+def is_secret_key(key: str) -> bool:
+    """Return True if a setting's value should never leave the backend in clear."""
+    return key in SECRET_KEYS

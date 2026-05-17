@@ -38,6 +38,14 @@ async def get_settings(request: Request) -> dict:
     return get_api(request).get_settings()
 
 
+@router.get("/manifest")
+async def get_manifest(request: Request) -> dict:
+    """Return the settings manifest (groups + per-field metadata + current
+    values). Drives the generated Settings UI; absent fields fall through to
+    the existing /api/settings endpoints."""
+    return get_api(request).manifest()
+
+
 @router.post("/save")
 async def save(body: KVIn, request: Request) -> dict:
     get_api(request).save_setting(body.key, body.value)

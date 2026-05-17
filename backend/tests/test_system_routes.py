@@ -53,7 +53,7 @@ def app_with_fake_api(tmp_path):
     settings = Settings(tmp_path / "settings.json")
 
     fake_local = MagicMock()
-    fake_local.list_local_models.return_value = [
+    _fake_rows = [
         {
             "id":             "qwen3-30b-a3b-q4_k_m",
             "size_bytes":     8_500_000_000,
@@ -71,6 +71,19 @@ def app_with_fake_api(tmp_path):
             "loaded":         False,
         },
     ]
+    fake_local.list_local_models.return_value = _fake_rows
+    # New per-source shape — used by the rewritten /local_models route.
+    fake_local.list_local_sources.return_value = {
+        "models": _fake_rows,
+        "sources": [
+            {"backend": "ollama",    "url": "http://localhost:11434",
+             "ok": True,  "error": None, "count": 1},
+            {"backend": "lm_studio", "url": "http://localhost:1234",
+             "ok": True,  "error": None, "count": 1},
+            {"backend": "bundled",   "url": None,
+             "ok": True,  "error": None, "count": 0},
+        ],
+    }
 
     fake_bundled = MagicMock()
     fake_bundled.is_running.return_value = False
@@ -116,6 +129,12 @@ class TestLocalModelsList:
         }
         assert first["backend"] == "ollama"
         assert body["models"][1]["backend"] == "lm_studio"
+        # New per-source shape: every configured backend appears with
+        # reachability metadata so the UI can render an inline status row.
+        assert isinstance(body["sources"], list)
+        assert {s["backend"] for s in body["sources"]} == {"ollama", "lm_studio", "bundled"}
+        assert all(set(s.keys()) >= {"backend", "url", "ok", "error", "count"}
+                   for s in body["sources"])
 
     def test_returns_empty_when_local_client_unavailable(self, app_with_fake_api):
         app, _, _bundled = app_with_fake_api
