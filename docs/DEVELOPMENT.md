@@ -37,7 +37,7 @@ backend/           Python FastAPI sidecar (pip-installable package)
 branding/          App icon
 build-scripts/     npm-script helpers (benchmarks + codegen)
 dev/               Developer entry scripts (dev.bat, build-installer.bat)
-legacy/            Pre-Pinokio PyInstaller artifacts (deleted in v1.0.1)
+legacy/            Pre-Pinokio PyInstaller spec, retained for reference
 ```
 
 Entry points:

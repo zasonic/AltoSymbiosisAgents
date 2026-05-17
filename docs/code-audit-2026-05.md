@@ -1,4 +1,6 @@
-# Codebase Review Report
+# Code Audit — May 2026
+
+**Status:** Historical artifact. All bugs identified below were already fixed in the commits preceding this file's move from the repository root into `docs/`. Each finding's `Status:` / `Fixed in:` block records where the fix landed. Keep this file for traceability — do not treat unmarked findings as open issues.
 
 Findings from a full read of the altosybioagents codebase, organized by severity (most likely to cause real user-facing problems first). Each finding has been verified against the source at the cited file:line locations.
 

@@ -28,9 +28,8 @@ You will need:
 ## Trust
 
 The installer is **not code-signed**. Windows shows "Windows protected
-your PC" on first run — click **More info → Run anyway**. See
-[docs/img/smartscreen.png](docs/img/smartscreen.png) for the exact
-dialog. Subsequent launches go straight to the app.
+your PC" on first run — click **More info → Run anyway**. Subsequent
+launches go straight to the app.
 
 If you're a cautious user:
 
@@ -61,16 +60,40 @@ dev\build-installer.bat      # produce NSIS installer (Windows)
 
 ## Where things live
 
-- App data: `%APPDATA%/altosybioagents/` on Windows,
+App data is split across two per-user directories. To open them, use
+**Settings → Diagnostics → Open data folder** inside the app — the exact
+paths are platform-dependent.
+
+- **Electron-managed data** lives under the platform's per-app data
+  directory (`%APPDATA%/altosybioagents/` on Windows,
   `~/Library/Application Support/altosybioagents/` on macOS,
-  `~/.config/altosybioagents/` on Linux. Settings, SQLite database, logs,
-  and the bundled Python environment (`bin/miniconda/`, `bin/sidecar-venv/`)
-  all live there. The API key is in the OS keyring, not on disk.
-- Source layout: `desktop-ui/` (React renderer), `desktop-shell/` (Electron
-  main + preload, including `bootstrap/` for the first-launch installer),
-  `backend/` (Python FastAPI sidecar — pip-installable package), `branding/`
-  (icon), `dev/` (developer scripts), `legacy/` (kept-for-one-release
-  PyInstaller artifacts, deleted in v1.0.1).
+  `~/.config/altosybioagents/` on Linux). It holds the bundled Python
+  environment (`bin/miniconda/`, `bin/sidecar-venv/`) and the Electron
+  process logs (`main.log`, `bootstrap.log`, `sidecar.log`).
+- **Sidecar-managed data** lives under the platform's per-user local
+  data directory (`%LOCALAPPDATA%/altosybioagents/altosybioagents/` on
+  Windows, `~/Library/Application Support/altosybioagents/` on macOS,
+  `~/.local/share/altosybioagents/` on Linux). It holds the settings
+  file (`settings.json`), the SQLite database (`myai.db`), and the
+  sidecar's runtime log (`app.log`).
+- **API key** lives in the OS keyring (Credential Manager / Keychain /
+  SecretService), never on disk. If the keyring is unavailable the app
+  falls back to plaintext in `settings.json` and shows a warning chip in
+  the status bar.
+
+Source layout:
+
+- `desktop-ui/` — React 19 renderer (UI, stores, panels).
+- `desktop-shell/` — Electron main + preload, plus `bootstrap/` for the
+  first-launch Miniconda + venv installer.
+- `backend/` — Python FastAPI sidecar (pip-installable package). Bound
+  to `127.0.0.1` on an OS-assigned port.
+- `branding/` — app icon.
+- `build-scripts/` — Python helpers used at release time (asset fetch,
+  API type generation, benchmark report).
+- `dev/` — developer scripts (`dev.bat`, `build-installer.bat`,
+  bundle-size / dead-code checks, vitest setup).
+- `legacy/` — pre-Pinokio PyInstaller spec, retained for reference.
 
 Deeper docs:
 - [docs/USER-GUIDE.md](docs/USER-GUIDE.md) — features and how to use them.
@@ -79,6 +102,8 @@ Deeper docs:
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common errors.
 - [docs/FAQ.md](docs/FAQ.md) — common questions.
 - [docs/legacy.md](docs/legacy.md) — pre-v6 code lives on the legacy/v5 branch.
+- [docs/code-audit-2026-05.md](docs/code-audit-2026-05.md) — historical
+  code audit (all findings already fixed).
 - [CHANGELOG.md](CHANGELOG.md) — user-facing changes per release.
 
 MIT — see [LICENSE](LICENSE).

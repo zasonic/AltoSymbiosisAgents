@@ -401,7 +401,7 @@ class TestConversationCRUD:
 # ── Codebase review fixes ─────────────────────────────────────────────────────
 
 class TestReviewBugFixes:
-    """Regression tests for Bugs 1, 4, 5, 6 from CODEBASE_REVIEW_REPORT.md."""
+    """Regression tests for Bugs 1, 4, 5, 6 from docs/code-audit-2026-05.md."""
 
     def test_bug1_rag_trim_path_does_not_raise(self, in_memory_db, claude_client,
                                                 local_client_unavailable, settings):
