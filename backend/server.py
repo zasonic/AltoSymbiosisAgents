@@ -183,16 +183,19 @@ def build_app(token: str, user_data: Path | None) -> tuple[FastAPI, _AppContaine
     # Allow only localhost origins; the Bearer middleware is the real gate.
     app.add_middleware(
         CORSMiddleware,
-        # Dev-server origins. Packaged Electron loads the renderer from
-        # ``file://`` (see desktop-shell/main.ts), whose Origin is ``null``
-        # and is not gated by this list — auth is enforced by
-        # BearerAuthMiddleware. The previous ``app://-`` entry never
-        # matched any actual origin and was removed.
+        # Dev-server origins + the packaged-build ``null`` origin.
+        # Packaged Electron loads the renderer from ``file://``
+        # (see desktop-shell/main.ts), whose Origin header is the string
+        # ``"null"`` (opaque origin). Chromium enforces CORS even for
+        # loopback when webSecurity:true, so the preflight OPTIONS and the
+        # subsequent request both require ``Access-Control-Allow-Origin: null``
+        # in the response. BearerAuthMiddleware remains the real auth gate.
         allow_origins=[
             "http://localhost:5173",
             "http://127.0.0.1:5173",
             "http://localhost:5174",
             "http://127.0.0.1:5174",
+            "null",  # file:// renderer origin in packaged Electron builds
         ],
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],

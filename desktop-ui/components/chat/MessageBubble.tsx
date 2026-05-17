@@ -11,6 +11,7 @@
 // ChatView and deferred — see the C2 commit message for the planned order.
 
 import { MessageRenderer } from "@/components/MessageRenderer";
+import { MessageErrorBoundary } from "@/components/MessageErrorBoundary";
 
 export interface MessageRow {
   id:           string;
@@ -34,11 +35,13 @@ export function MessageBubble({ msg, voiceOutputEnabled }: MessageBubbleProps) {
           : "bg-bg-2 text-ink border border-line"
       }`}
     >
-      <MessageRenderer
-        content={msg.content}
-        role={msg.role}
-        voiceOutputEnabled={voiceOutputEnabled}
-      />
+      <MessageErrorBoundary>
+        <MessageRenderer
+          content={msg.content}
+          role={msg.role}
+          voiceOutputEnabled={voiceOutputEnabled}
+        />
+      </MessageErrorBoundary>
       {msg.model_used && (
         <div className="text-[11px] text-ink-faint mt-2">
           {msg.model_used}

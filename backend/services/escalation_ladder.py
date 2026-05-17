@@ -355,7 +355,11 @@ class EscalationLadder:
                 f"QUESTION: {user_message[:300]}\nRESPONSE: {(response_text or '')[:500]}",
                 max_tokens=100,
             )
-        except Exception:
+        except (OSError, RuntimeError, ConnectionError) as exc:
+            log.debug("Quality score unavailable (client error): %s", exc)
+            return None
+        except Exception as exc:
+            log.debug("Quality score call failed unexpectedly: %s", exc)
             return None
         if not quality_raw:
             return None

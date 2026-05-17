@@ -47,17 +47,30 @@ export function subscribeEvents(
 
   // Wire one listener per registered event name. The server sends
   // `event: <name>\ndata: <json>` so the browser fires a named CustomEvent.
+  // Keep named references so close() can remove them — anonymous listeners
+  // added with addEventListener are not removed by source.close() alone,
+  // and can fire once during a reconnect before GC collects the old source.
+  // Typed as EventListener (evt: Event) with an internal cast to MessageEvent
+  // so the Map type is compatible with removeEventListener under strict mode.
+  const listeners = new Map<string, EventListener>();
   for (const [name, handler] of Object.entries(opts.handlers)) {
-    source.addEventListener(name, (e: MessageEvent) => {
+    const listener: EventListener = (evt) => {
       try {
-        handler(JSON.parse(e.data));
+        handler(JSON.parse((evt as MessageEvent).data));
       } catch (err) {
         console.warn(`[sse] failed to parse event ${name}:`, err);
       }
-    });
+    };
+    listeners.set(name, listener);
+    source.addEventListener(name, listener);
   }
 
   return {
-    close: () => source.close(),
+    close: () => {
+      for (const [name, listener] of listeners) {
+        source.removeEventListener(name, listener);
+      }
+      source.close();
+    },
   };
 }

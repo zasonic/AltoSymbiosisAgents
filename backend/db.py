@@ -912,6 +912,17 @@ _MIGRATIONS = [
         "ALTER TABLE router_log ADD COLUMN turn_id TEXT",
         "CREATE INDEX IF NOT EXISTS idx_router_log_turn_id ON router_log(turn_id)",
     ]),
+
+    # ── Missing conversation-level indexes ───────────────────────────────────
+    # messages and token_usage are both queried by conversation_id on every
+    # chat turn (history fetch + budget sum). Without an index each query
+    # does a full table scan — O(n) cost that grows with conversation count.
+    ("idx_messages_conversation.1.0", [
+        "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)",
+    ]),
+    ("idx_token_usage_conversation.1.0", [
+        "CREATE INDEX IF NOT EXISTS idx_token_usage_conversation ON token_usage(conversation_id)",
+    ]),
 ]
 
 

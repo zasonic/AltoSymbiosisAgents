@@ -28,6 +28,7 @@ import {
 import { t } from "@/i18n";
 import { MessageBubble, type MessageRow } from "@/components/chat/MessageBubble";
 import { MessageRenderer } from "@/components/MessageRenderer";
+import { MessageErrorBoundary } from "@/components/MessageErrorBoundary";
 import { useAppStore } from "@/stores/appStore";
 
 interface ConversationRow {
@@ -1569,7 +1570,9 @@ function ChatListRow({ index, style, data }: ListChildComponentProps<ChatRowData
             {/* Don't expose the speaker on the still-streaming buffer; the
                 speaker would synthesize a partial sentence. The persisted
                 MessageBubble below picks it up after chat_done. */}
-            <MessageRenderer content={item.buffer} role="assistant" />
+            <MessageErrorBoundary>
+              <MessageRenderer content={item.buffer} role="assistant" />
+            </MessageErrorBoundary>
             <span
               role="status"
               aria-label="Assistant is thinking"

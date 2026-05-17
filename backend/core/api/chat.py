@@ -106,6 +106,14 @@ class ChatAPI(BaseAPI):
                     friendly = "Connection lost — check your internet and try again."
                 elif "local model unavailable" in err_msg or "no response" in err_msg:
                     friendly = "Local model didn't respond — is it still running? Check Settings."
+                elif (
+                    "authorizationerror" in type(e).__name__.lower()
+                    or "routingerror" in type(e).__name__.lower()
+                    or "required skills" in err_msg
+                    or "no agent" in err_msg
+                    or "cannot satisfy" in err_msg
+                ):
+                    friendly = "This agent isn't configured to handle that request. Try a different agent or update its skills in Settings."
                 else:
                     friendly = f"Something went wrong: {type(e).__name__}. Check the error log in Settings for details."
                 self._emit("chat_error", {"error": friendly, "conversation_id": conversation_id})
