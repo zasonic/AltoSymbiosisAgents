@@ -615,32 +615,61 @@ async function fetchUpdateMechanism(info: SidecarHttpInfo): Promise<UpdateMechan
 // Constructed once and reused for every "update-available" payload. The
 // publish target in electron-builder.yml is the source of truth; this
 // constant must mirror it. Keep in sync if the publish section ever moves.
-const RELEASE_NOTES_BASE = "https://github.com/zasonic/altosybioagents/releases/tag";
-const LATEST_RELEASE_API = "https://api.github.com/repos/zasonic/altosybioagents/releases/latest";
+const RELEASE_NOTES_BASE = "https://github.com/zasonic/AltoSymbiosisAgents/releases/tag";
+// List, not /latest, so we pick up pre-releases too (the in-app banner is
+// the only update channel during a -test.N phase). per_page kept small to
+// stay well inside the 60-req/hr unauthenticated rate limit.
+const RELEASES_LIST_API = "https://api.github.com/repos/zasonic/AltoSymbiosisAgents/releases?per_page=10";
 const UPDATE_POLL_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-function parseSemver(v: string): [number, number, number] | null {
-  // Accepts "1.2.3", "v1.2.3", "1.2.3-test", "1.2.3-test-2", etc. Pre-release
-  // suffixes are dropped for the comparison — they're only meaningful to the
-  // user reading the release notes, not to "is this newer than installed?".
-  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v);
-  if (!m) return null;
-  return [Number(m[1]), Number(m[2]), Number(m[3])];
+interface ParsedVersion {
+  numeric: [number, number, number];
+  prerelease: string | null;
 }
 
-function isStrictlyNewer(remote: string, installed: string): boolean {
-  const a = parseSemver(remote);
-  const b = parseSemver(installed);
-  if (!a || !b) return false;
+function parseVersion(v: string): ParsedVersion | null {
+  // Accepts "1.2.3", "v1.2.3", "1.2.3-test.1", etc. The prerelease tail
+  // (everything after the first "-") is captured so the compare function
+  // can iterate "1.0.0-test.1" → "1.0.0-test.2" correctly.
+  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(v);
+  if (!m) return null;
+  return {
+    numeric: [Number(m[1]), Number(m[2]), Number(m[3])],
+    prerelease: m[4] ?? null,
+  };
+}
+
+function compareVersions(a: string, b: string): number {
+  const pa = parseVersion(a);
+  const pb = parseVersion(b);
+  if (!pa || !pb) return 0;
   for (let i = 0; i < 3; i += 1) {
-    if (a[i] > b[i]) return true;
-    if (a[i] < b[i]) return false;
+    if (pa.numeric[i] !== pb.numeric[i]) return pa.numeric[i] - pb.numeric[i];
   }
-  return false;
+  // SemVer: a version with no prerelease tail outranks any prerelease of the
+  // same numeric version. So 1.0.0 > 1.0.0-test.5.
+  if (pa.prerelease === null && pb.prerelease !== null) return 1;
+  if (pa.prerelease !== null && pb.prerelease === null) return -1;
+  if (pa.prerelease === pb.prerelease) return 0;
+  const segA = (pa.prerelease as string).split(".");
+  const segB = (pb.prerelease as string).split(".");
+  for (let i = 0; i < Math.max(segA.length, segB.length); i += 1) {
+    if (segA[i] === undefined) return -1;
+    if (segB[i] === undefined) return 1;
+    const numA = /^\d+$/.test(segA[i]) ? Number(segA[i]) : null;
+    const numB = /^\d+$/.test(segB[i]) ? Number(segB[i]) : null;
+    if (numA !== null && numB !== null) {
+      if (numA !== numB) return numA - numB;
+    } else if (segA[i] !== segB[i]) {
+      return segA[i] < segB[i] ? -1 : 1;
+    }
+  }
+  return 0;
 }
 
 interface GhRelease {
   tag_name?: string;
+  draft?: boolean;
   assets?: { name?: string; browser_download_url?: string }[];
 }
 
@@ -649,23 +678,32 @@ async function checkManualUpdate(): Promise<void> {
   // here (network, rate limit, GH outage) is silent so an offline run doesn't
   // spam the user with banners.
   try {
-    const res = await fetch(LATEST_RELEASE_API, {
+    const res = await fetch(RELEASES_LIST_API, {
       headers: { Accept: "application/vnd.github+json" },
     });
     if (!res.ok) return;
-    const body = (await res.json()) as GhRelease;
-    const tag = body.tag_name ?? "";
-    if (!tag || !isStrictlyNewer(tag, app.getVersion())) return;
-    const exeAsset = (body.assets ?? []).find(
-      (a) => typeof a.name === "string" && a.name.toLowerCase().endsWith(".exe"),
-    );
-    const downloadUrl = exeAsset?.browser_download_url;
-    if (!downloadUrl) return;
-    const version = tag.replace(/^v/, "");
+    const releases = (await res.json()) as GhRelease[];
+    const installed = app.getVersion();
+    let best: { tag: string; downloadUrl: string } | null = null;
+    for (const rel of releases) {
+      if (rel.draft) continue;
+      const tag = rel.tag_name ?? "";
+      if (!tag) continue;
+      if (compareVersions(tag, installed) <= 0) continue;
+      const exeAsset = (rel.assets ?? []).find(
+        (a) => typeof a.name === "string" && a.name.toLowerCase().endsWith(".exe"),
+      );
+      const downloadUrl = exeAsset?.browser_download_url;
+      if (!downloadUrl) continue;
+      if (!best || compareVersions(tag, best.tag) > 0) {
+        best = { tag, downloadUrl };
+      }
+    }
+    if (!best) return;
     sendToRenderer("update:available", {
-      version,
-      notesUrl: `${RELEASE_NOTES_BASE}/${tag}`,
-      downloadUrl,
+      version: best.tag.replace(/^v/, ""),
+      notesUrl: `${RELEASE_NOTES_BASE}/${best.tag}`,
+      downloadUrl: best.downloadUrl,
     });
   } catch (err) {
     logToFile(`manual update check failed: ${err instanceof Error ? err.message : err}\n`);
@@ -693,6 +731,10 @@ async function wireAutoUpdater(): Promise<void> {
   // mechanism === "auto"
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  // Match the manual path: pick up pre-releases too. Without this,
+  // electron-updater skips any tag with a "-test.N" suffix even when
+  // it's the newest non-draft release.
+  autoUpdater.allowPrerelease = true;
 
   autoUpdater.on("update-available", (autoInfo) => {
     sendToRenderer("update:available", {

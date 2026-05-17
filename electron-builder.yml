@@ -84,7 +84,7 @@ nsis:
 publish:
   provider: github
   owner: zasonic
-  repo: altosybioagents
+  repo: AltoSymbiosisAgents
   # Emit latest.yml alongside the NSIS installer so electron-updater can
   # discover the new version. Defaults to true for the github provider, but
   # making it explicit guards against a future electron-builder release

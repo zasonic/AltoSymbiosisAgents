@@ -1,1 +1,1 @@
-Pre-v6 code lives on the [legacy/v5 branch](https://github.com/zasonic/altosybioagents/tree/legacy/v5).
+Pre-v6 code lives on the [legacy/v5 branch](https://github.com/zasonic/AltoSymbiosisAgents/tree/legacy/v5).

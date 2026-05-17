@@ -77,8 +77,8 @@ Node 20+, and Python 3.12+ can build the same `.exe` from the same git
 commit. To verify a release you downloaded matches the one that was tagged:
 
 ```
-git clone https://github.com/zasonic/altosybioagents.git
-cd altosybioagents
+git clone https://github.com/zasonic/AltoSymbiosisAgents.git
+cd AltoSymbiosisAgents
 git checkout v<x.y.z>          # the tag for the release you have
 dev\build-installer.bat        # builds dist\altosybioagents-Setup-<x.y.z>.exe
 Get-FileHash dist\*.exe -Algorithm SHA256

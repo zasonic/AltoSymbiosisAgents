@@ -69,7 +69,7 @@ describe("UpdateBanner", () => {
     useAppStore.setState({
       updateReady: {
         version: "5.1.0",
-        downloadUrl: "https://github.com/zasonic/altosybioagents/releases/download/v5.1.0/altosybioagents-Setup-5.1.0.exe",
+        downloadUrl: "https://github.com/zasonic/AltoSymbiosisAgents/releases/download/v5.1.0/altosybioagents-Setup-5.1.0.exe",
       },
     });
     render(<UpdateBanner />);
@@ -77,7 +77,7 @@ describe("UpdateBanner", () => {
     expect(screen.getByText(/Download to install/i)).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: /download v5\.1\.0/i }));
     expect(window.electronAPI.openExternal).toHaveBeenCalledWith(
-      "https://github.com/zasonic/altosybioagents/releases/download/v5.1.0/altosybioagents-Setup-5.1.0.exe",
+      "https://github.com/zasonic/AltoSymbiosisAgents/releases/download/v5.1.0/altosybioagents-Setup-5.1.0.exe",
     );
     expect(window.electronAPI.installUpdate).not.toHaveBeenCalled();
   });

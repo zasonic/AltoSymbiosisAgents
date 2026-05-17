@@ -7,7 +7,7 @@ everything on your machine.
 ## Install
 
 Download the latest installer from
-[Releases](https://github.com/zasonic/altosybioagents/releases) and double-click.
+[Releases](https://github.com/zasonic/AltoSymbiosisAgents/releases) and double-click.
 No system Python or Node is required — on first launch the app downloads
 Miniconda and creates its own Python environment under `%APPDATA%`.
 

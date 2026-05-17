@@ -7,6 +7,8 @@ and this project loosely tracks [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-05-17
+
 ### Added
 - Tri-state update mechanism (`update_mechanism`: `off` / `auto` / `manual`).
   Manual mode polls the GitHub releases API and shows a "Download" banner
@@ -37,6 +39,9 @@ and this project loosely tracks [Semantic Versioning](https://semver.org/).
   windows-smoke workflows).
 - README documents the unsigned-installer SmartScreen path and links to
   `SECURITY.md` and the reproducible-build instructions.
+- In-app update check (both `auto` and `manual` mechanisms) now includes
+  pre-releases. Previously `/releases/latest` was used, which silently
+  skipped any tag with a `-test.N` suffix.
 
 ### Removed
 - `auto_update_enabled` boolean. Replaced by `update_mechanism`.
@@ -49,8 +54,13 @@ and this project loosely tracks [Semantic Versioning](https://semver.org/).
   previous bare `Start-Process server.exe` failed argparse and timed out.
 - `docs/architecture.md` references to `services/memory.py` (the file is a
   package) and `backend/core/labels.py` (the file does not exist).
+- GitHub repo slug in README, docs, in-app updater URLs, electron-builder
+  publish config, and `UpdateBanner` test fixtures. The previous lowercase
+  `zasonic/altosybioagents` slug 404'd against the actual repo
+  `zasonic/AltoSymbiosisAgents`, breaking the Releases link and in-app
+  auto-update.
 
-## [1.0.0] — first public release
+## [1.0.0-test.1] — 2026-05-13 (pre-release)
 
 Initial public release. Feature set:
 
