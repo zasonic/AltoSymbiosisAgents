@@ -11,12 +11,13 @@ import {
 import { t } from "@/i18n";
 import { useAppStore } from "@/stores/appStore";
 
-// Asymmetric on purpose. The orchestrator currently has two switches:
-//   routing_enabled=true   → router picks Claude vs local per message
-//   routing_enabled=false  → always send to `claude_model`
-// There's no "always use this exact local model" mode, so a local pick can
-// only set the default model Smart Routing reaches for. The dropdown footer
-// surfaces this so users aren't surprised.
+// Three mutually-exclusive states the picker writes to the backend:
+//   Smart routing → routing_enabled=true,  pinned_local_model=""
+//   Claude pin    → routing_enabled=false, claude_model=<id>, pinned_local_model=""
+//   Local pin     → routing_enabled=true,  pinned_local_model=<id>
+// The orchestrator's TaskRouter checks pinned_local_model right after the
+// routing_enabled gate so a local pick truly forces every turn to that
+// model, symmetric with the Claude pick.
 const LOCAL_BACKENDS: LocalBackend[] = ["ollama", "lm_studio", "bundled"];
 
 export function ModelSwitcher() {
@@ -28,7 +29,7 @@ export function ModelSwitcher() {
   const [localModels, setLocalModels] = useState<LocalModelRow[]>([]);
   const [routingEnabled, setRoutingEnabled] = useState<boolean | null>(null);
   const [claudeModel, setClaudeModel] = useState<string>("");
-  const [defaultLocalModel, setDefaultLocalModel] = useState<string>("");
+  const [pinnedLocalModel, setPinnedLocalModel] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -47,7 +48,7 @@ export function ModelSwitcher() {
       setLocalModels(local.models);
       setRoutingEnabled(Boolean(settings.routing_enabled));
       setClaudeModel(settings.claude_model || "");
-      setDefaultLocalModel(settings.default_local_model || "");
+      setPinnedLocalModel(settings.pinned_local_model || "");
     } catch (err) {
       // Don't toast on background fetch — the chat itself will surface a
       // user-visible error if the sidecar is genuinely broken.
@@ -84,6 +85,7 @@ export function ModelSwitcher() {
     setBusy(true);
     try {
       await Settings.set("routing_enabled", true);
+      await Settings.set("pinned_local_model", "");
       pushToast({ kind: "success", text: "Smart routing enabled" });
       await refresh();
     } catch (err) {
@@ -102,6 +104,7 @@ export function ModelSwitcher() {
     try {
       await Settings.set("routing_enabled", false);
       await Settings.set("claude_model", id);
+      await Settings.set("pinned_local_model", "");
       pushToast({ kind: "success", text: `Sending to Claude · ${id}` });
       await refresh();
     } catch (err) {
@@ -118,11 +121,12 @@ export function ModelSwitcher() {
   const pickLocal = async (id: string) => {
     setBusy(true);
     try {
-      await Settings.set("default_local_model", id);
-      pushToast({
-        kind: "success",
-        text: `Local default set to ${id} (Smart Routing remains on)`,
-      });
+      // Re-enable Smart Routing so the routing_enabled=false Claude-pin state
+      // (if previously set) doesn't shadow the new local pin. The pin itself
+      // is what the orchestrator reads to force the model.
+      await Settings.set("routing_enabled", true);
+      await Settings.set("pinned_local_model", id);
+      pushToast({ kind: "success", text: `Sending to local · ${id}` });
       await refresh();
     } catch (err) {
       pushToast({
@@ -135,15 +139,15 @@ export function ModelSwitcher() {
     }
   };
 
-  // What the closed pill displays. Reads "Smart routing" by default, or the
-  // pinned Claude model when routing is off. Falls back to "Loading…" before
-  // the first refresh resolves so the layout doesn't jump.
+  // What the closed pill displays. Falls back to "Loading…" before the first
+  // refresh resolves so the layout doesn't jump. Pinned local wins over
+  // routing/claude_model since it's the most recent explicit user pick.
   const pillLabel = (() => {
     if (routingEnabled === null) return "Loading…";
+    if (pinnedLocalModel) {
+      return `Local · ${pinnedLocalModel}`;
+    }
     if (routingEnabled) {
-      if (defaultLocalModel) {
-        return `Smart routing · local: ${defaultLocalModel}`;
-      }
       return "Smart routing";
     }
     const claude = claudeModels.find((c) => c.id === claudeModel);
@@ -151,11 +155,10 @@ export function ModelSwitcher() {
   })();
 
   const isPickedClaude = (id: string) =>
-    routingEnabled === false && claudeModel === id;
-  const isPickedLocal = (id: string) =>
-    routingEnabled === true && defaultLocalModel === id;
+    !pinnedLocalModel && routingEnabled === false && claudeModel === id;
+  const isPickedLocal = (id: string) => pinnedLocalModel === id;
   const isSmartRouting =
-    routingEnabled === true && !defaultLocalModel;
+    !pinnedLocalModel && routingEnabled === true;
 
   return (
     <div ref={containerRef} className="relative">
@@ -239,8 +242,8 @@ export function ModelSwitcher() {
           })}
 
           <div className="px-3 pt-3 pb-1 text-[11px] text-ink-faint border-t border-line/40 mt-2">
-            Picking a Claude model pins the next messages to Claude. Picking a
-            local model sets the default Smart Routing uses for simple turns.
+            Smart routing picks per message. Picking a Claude or local model
+            pins every turn to that model.
           </div>
         </div>
       )}

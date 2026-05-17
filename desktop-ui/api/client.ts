@@ -164,6 +164,7 @@ export interface SettingsPayload {
   claude_prompt_caching: boolean;
   default_local_backend: string;
   default_local_model: string;
+  pinned_local_model: string;
   system_prompt: string;
   start_tab: string;
   routing_enabled: boolean;

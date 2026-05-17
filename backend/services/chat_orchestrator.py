@@ -632,9 +632,14 @@ class ChatOrchestrator:
                 max_tokens=agent_max_tokens,
             )
         else:
+            # Chat-header pin wins over the Smart-Routing default so the user
+            # gets the exact model they picked. Empty pin falls back to the
+            # Smart-Routing default model.
+            pinned = self._settings.get("pinned_local_model", "") or ""
+            model_name = pinned or self._settings.get("default_local_model", "local")
             return ExecutionTarget(
                 backend="local",
-                model_name=self._settings.get("default_local_model", "local"),
+                model_name=model_name,
                 max_tokens=min(agent_max_tokens, 2048),
             )
 
@@ -1232,7 +1237,9 @@ class ChatOrchestrator:
         # so the user sees a friendly hint instead of a silent text-only
         # response. The list is reused below.
         if image_attachments and target.backend == "local":
-            local_model = self._settings.get("default_local_model", "")
+            # Use target.model_name so a pinned local model shows up in the
+            # error rather than the Smart-Routing default fallback.
+            local_model = target.model_name or self._settings.get("default_local_model", "")
             if not (
                 hasattr(self.local, "is_vision_model")
                 and self.local.is_vision_model(local_model)

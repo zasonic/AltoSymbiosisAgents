@@ -46,6 +46,7 @@ class SettingsAPI(BaseAPI):
             "claude_prompt_caching": self._settings.get("claude_prompt_caching"),
             "default_local_backend": self._settings.get("default_local_backend"),
             "default_local_model":   self._settings.get("default_local_model"),
+            "pinned_local_model":    self._settings.get("pinned_local_model"),
             "system_prompt":         self._settings.get("system_prompt"),
             "start_tab":             self._settings.get("start_tab"),
             "routing_enabled":               self._settings.get("routing_enabled"),

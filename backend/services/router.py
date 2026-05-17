@@ -154,6 +154,19 @@ class TaskRouter:
                                 reasoning="routing disabled or local unavailable",
                                 confidence=1.0)
 
+        # Chat-header local pin: symmetric counterpart of routing_enabled=false
+        # for the Claude side. When ``pinned_local_model`` is non-empty every
+        # turn is forced to local with that model id — no classifier call, no
+        # UAR escalation. The ModelSwitcher enforces mutual exclusion with the
+        # Claude pin so we only need a non-empty check here.
+        pinned = self._settings.get("pinned_local_model", "") or ""
+        if pinned:
+            return RouteDecision(
+                model="local", complexity="medium",
+                reasoning=f"pinned to local model {pinned}",
+                confidence=1.0,
+            )
+
         # Fast path: explicit user overrides (no model call needed)
         lower = message.lower().strip()
         if any(kw in lower for kw in ("@claude", "use claude", "ask claude")):

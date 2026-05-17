@@ -85,6 +85,13 @@ SETTINGS_DEFAULTS: dict[str, tuple] = {
     "claude_api_key":              (str,   ""),
     "claude_model":                (str,   "claude-sonnet-4-6"),
     "default_local_model":         (str,   ""),
+    # Chat-header pin for "always use this exact local model" mode. When
+    # non-empty, the router forces every turn to local with this model id —
+    # the symmetric counterpart of routing_enabled=false + claude_model=X
+    # for the Claude side. Mutually exclusive with routing_enabled=false
+    # (the ModelSwitcher enforces this). Cleared by Smart Routing or any
+    # Claude pick.
+    "pinned_local_model":          (str,   ""),
     "system_prompt":               (str,   "You are a helpful AI assistant."),
 
     # Local model backends
@@ -563,7 +570,13 @@ FIELD_METADATA: dict[str, dict] = {
     },
     "default_local_model": {
         "label":       "Active local model",
-        "description": "Model id the router uses when it picks the local backend.",
+        "description": "Model id the router uses when Smart Routing picks the local backend.",
+        "type":        "string",
+        "group":       "local_models",
+    },
+    "pinned_local_model": {
+        "label":       "Pinned local model",
+        "description": "When set, every chat turn is forced to this local model and Smart Routing is bypassed. Empty means Smart Routing is in charge.",
         "type":        "string",
         "group":       "local_models",
     },
