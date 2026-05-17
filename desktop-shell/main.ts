@@ -58,6 +58,22 @@ function logToFile(text: string): void {
   }
 }
 
+function sendToRenderer(channel: string, payload?: unknown): void {
+  // Optional chaining on mainWindow only catches the null case, not the
+  // destruction case: during app quit, mainWindow remains non-null for a
+  // brief window after webContents has been torn down. Late SidecarManager
+  // 'status' / autoUpdater events that arrive in that window blow up with
+  // `TypeError: Object has been destroyed`. Guard both layers.
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const wc = mainWindow.webContents;
+    if (!wc || wc.isDestroyed()) return;
+    wc.send(channel, payload);
+  } catch {
+    /* Renderer torn down between the isDestroyed check and the send call. */
+  }
+}
+
 function bootstrapLog(text: string): void {
   // Bootstrap-specific log so the wizard's "Open log folder" button has a
   // dedicated file to point users at. Also mirrored into main.log via
@@ -431,9 +447,7 @@ function wireIpc(): void {
   // so failure modes 1-3 (spawn failure, post-PORT app-init crash, slow cold
   // start) stay in the wizard error card instead of leaking to the chat UI.
   ipcMain.handle("bootstrap:start", async () => {
-    const send = (channel: string, payload?: unknown): void => {
-      mainWindow?.webContents.send(channel, payload);
-    };
+    const send = sendToRenderer;
     const sourceDir = getResourceDir("sidecar");
     const userDataDir = app.getPath("userData");
     const sidecarLogPath = join(userDataDir, "sidecar.log");
@@ -648,7 +662,7 @@ async function checkManualUpdate(): Promise<void> {
     const downloadUrl = exeAsset?.browser_download_url;
     if (!downloadUrl) return;
     const version = tag.replace(/^v/, "");
-    mainWindow?.webContents.send("update:available", {
+    sendToRenderer("update:available", {
       version,
       notesUrl: `${RELEASE_NOTES_BASE}/${tag}`,
       downloadUrl,
@@ -681,13 +695,13 @@ async function wireAutoUpdater(): Promise<void> {
   autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on("update-available", (autoInfo) => {
-    mainWindow?.webContents.send("update:available", {
+    sendToRenderer("update:available", {
       version: autoInfo.version,
       notesUrl: `${RELEASE_NOTES_BASE}/v${autoInfo.version}`,
     });
   });
   autoUpdater.on("update-downloaded", (autoInfo) => {
-    mainWindow?.webContents.send("update:downloaded", { version: autoInfo.version });
+    sendToRenderer("update:downloaded", { version: autoInfo.version });
   });
   autoUpdater.on("error", (err) => {
     // Log only — surfacing this via a dialog would break the
@@ -714,7 +728,7 @@ function startSidecar(userDataDir: string): SidecarManager {
   // double-awaiting .start().
   sidecar = new SidecarManager(PROJECT_ROOT, userDataDir);
   sidecar.on("status", (status) => {
-    mainWindow?.webContents.send("sidecar:status", status);
+    sendToRenderer("sidecar:status", status);
     logToFile(`sidecar status: ${JSON.stringify(status)}\n`);
   });
   sidecar.start().catch((err) => {
