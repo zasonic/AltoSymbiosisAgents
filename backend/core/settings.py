@@ -104,6 +104,9 @@ SETTINGS_DEFAULTS: dict[str, tuple] = {
     # is hung and the user doesn't want to keep waiting. Surfaced in the
     # settings manifest so users can lengthen it on slow/remote setups.
     "local_probe_timeout_sec":     (float, 2.0),
+    # How long to wait for a chat response from any local model backend.
+    # Promoted from the hardcoded timeout=120 in local_client.py.
+    "local_inference_timeout_sec": (int,   120),
 
     # Phase 9: Bundled llama.cpp server.
     # local_backend_mode picks which local stack the LocalClient routes to:
@@ -116,6 +119,9 @@ SETTINGS_DEFAULTS: dict[str, tuple] = {
     # the field on a forward-incompatible enum check.
     "local_backend_mode":          (str,   "auto"),
     "bundled_model_id":            (str,   ""),
+    # HTTP timeout for downloading bundled GGUF model files from HuggingFace.
+    # Promoted from _DOWNLOAD_TIMEOUT_SEC in bundled_server.py.
+    "bundled_download_timeout_sec": (int,  60),
     # Set by BundledServer._drain_pipe on the first "offloaded N/M layers to
     # GPU" line emitted by llama-server. True when N == 0 (the Vulkan build
     # could not find a usable GPU and fell back to CPU); False otherwise.
@@ -266,6 +272,10 @@ SETTINGS_DEFAULTS: dict[str, tuple] = {
     "voice_output_enabled":          (bool,  False),
     "stt_model_id":                  (str,   "whisper-base.en"),
     "tts_voice_id":                  (str,   "en_US-amy-medium"),
+    # Subprocess timeouts for voice features. Promoted from module-level
+    # constants in voice.py so users on slow CPUs can increase them.
+    "voice_transcribe_timeout_sec":  (float, 600.0),
+    "voice_synthesize_timeout_sec":  (float,  60.0),
 
     # Agent / project
     "agent_project_root":            (str,   ""),
@@ -576,9 +586,10 @@ FIELD_METADATA: dict[str, dict] = {
     },
     "pinned_local_model": {
         "label":       "Pinned local model",
-        "description": "When set, every chat turn is forced to this local model and Smart Routing is bypassed. Empty means Smart Routing is in charge.",
+        "description": "When set, every chat turn is forced to this local model and Smart Routing is bypassed. Manage via the model picker in the chat header.",
         "type":        "string",
         "group":       "local_models",
+        "read_only":   True,
     },
     "bundled_model_id": {
         "label":       "Bundled model",
@@ -606,6 +617,286 @@ FIELD_METADATA: dict[str, dict] = {
         "min":         0.0,
         "max":         100.0,
     },
+
+    # ── Local models (additional) ────────────────────────────────────────────
+    "local_inference_timeout_sec": {
+        "label":       "Inference timeout",
+        "description": "Maximum wait for a response from any local model backend.",
+        "type":        "int",
+        "group":       "local_models",
+        "unit":        "seconds",
+        "min":         10,
+        "max":         600,
+    },
+    "bundled_download_timeout_sec": {
+        "label":       "Download timeout",
+        "description": "HTTP timeout per request when fetching bundled GGUF model files.",
+        "type":        "int",
+        "group":       "local_models",
+        "unit":        "seconds",
+        "min":         10,
+        "max":         300,
+    },
+
+    # ── Chat ─────────────────────────────────────────────────────────────────
+    "system_prompt": {
+        "label":       "System prompt",
+        "description": "Default instructions prepended to every conversation.",
+        "type":        "textarea",
+        "group":       "chat",
+    },
+
+    # ── Smart routing ─────────────────────────────────────────────────────────
+    "routing_enabled": {
+        "label":       "Enable smart routing",
+        "description": "Uncertainty-aware classifier routes easy turns to local models.",
+        "type":        "bool",
+        "group":       "routing",
+    },
+    "local_model_min_params": {
+        "label":       "Minimum model size",
+        "description": "Smallest local model the router will consider for non-trivial turns.",
+        "type":        "enum",
+        "group":       "routing",
+        "options": [
+            {"value": "3B",  "label": "3B"},
+            {"value": "7B",  "label": "7B"},
+            {"value": "13B", "label": "13B"},
+            {"value": "34B", "label": "34B"},
+            {"value": "70B", "label": "70B"},
+        ],
+    },
+
+    # ── Appearance ────────────────────────────────────────────────────────────
+    "theme": {
+        "label":       "Theme",
+        "description": "Color scheme for the application.",
+        "type":        "enum",
+        "group":       "appearance",
+        "options": [
+            {"value": "system", "label": "System default"},
+            {"value": "light",  "label": "Light"},
+            {"value": "dark",   "label": "Dark"},
+        ],
+    },
+    "show_token_counts": {
+        "label":       "Show token counts",
+        "description": "Display approximate token count below the composer.",
+        "type":        "bool",
+        "group":       "appearance",
+    },
+    "show_cost_estimates": {
+        "label":       "Show cost estimates",
+        "description": "Show estimated cost next to token counts when a Claude model is pinned.",
+        "type":        "bool",
+        "group":       "appearance",
+    },
+    "start_tab": {
+        "label":       "Start tab",
+        "description": "Which tab opens when the app launches.",
+        "type":        "enum",
+        "group":       "appearance",
+        "options": [
+            {"value": "chat",     "label": "Chat"},
+            {"value": "memory",   "label": "Memory"},
+            {"value": "agents",   "label": "Agents"},
+            {"value": "mcp",      "label": "Tool servers"},
+            {"value": "settings", "label": "Settings"},
+        ],
+    },
+
+    # ── Updates ───────────────────────────────────────────────────────────────
+    "update_mechanism": {
+        "label":       "Update mechanism",
+        "description": "How the app checks for and installs new versions.",
+        "type":        "enum",
+        "group":       "updates",
+        "options": [
+            {"value": "auto",   "label": "Automatic — download and install in the background"},
+            {"value": "manual", "label": "Manual — notify me and open the download page"},
+            {"value": "off",    "label": "Off — never check for updates"},
+        ],
+    },
+
+    # ── Knowledge base ────────────────────────────────────────────────────────
+    "rag_folder": {
+        "label":       "Knowledge folder",
+        "description": "Directory scanned for documents to index for retrieval.",
+        "type":        "string",
+        "group":       "rag",
+        "placeholder": "/path/to/docs",
+    },
+    "rag_chunk_size": {
+        "label":       "Chunk size",
+        "description": "Number of characters per document chunk when indexing.",
+        "type":        "int",
+        "group":       "rag",
+        "unit":        "chars",
+        "min":         100,
+        "max":         4000,
+    },
+    "rag_chunk_overlap": {
+        "label":       "Chunk overlap",
+        "description": "Overlap between adjacent chunks to preserve context at boundaries.",
+        "type":        "int",
+        "group":       "rag",
+        "unit":        "chars",
+        "min":         0,
+        "max":         1000,
+    },
+
+    # ── Memory ────────────────────────────────────────────────────────────────
+    "memory_write_gate_enabled": {
+        "label":       "Write gate",
+        "description": "Require explicit confirmation before writing new memories.",
+        "type":        "bool",
+        "group":       "memory",
+    },
+    "memory_history_cap": {
+        "label":       "History cap",
+        "description": "Maximum number of past turns the memory retriever considers.",
+        "type":        "int",
+        "group":       "memory",
+        "unit":        "turns",
+        "min":         5,
+        "max":         200,
+    },
+    "memory_similarity_threshold": {
+        "label":       "Similarity threshold",
+        "description": "Minimum cosine similarity for a memory to be retrieved.",
+        "type":        "float",
+        "group":       "memory",
+        "min":         0.0,
+        "max":         1.0,
+    },
+
+    # ── Advanced ──────────────────────────────────────────────────────────────
+    "goal_decomposition_enabled": {
+        "label":       "Goal decomposition",
+        "description": "Break complex requests into sub-tasks before executing.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "interleaved_reasoning_enabled": {
+        "label":       "Interleaved reasoning",
+        "description": "Run reasoning steps between tool calls for deeper analysis.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "knowledge_graph_enabled": {
+        "label":       "Knowledge graph",
+        "description": "Build and query a structured graph of entities and relationships.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "vision_enabled": {
+        "label":       "Vision (image input)",
+        "description": "Allow image attachments in chat messages.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "high_stakes_voting_enabled": {
+        "label":       "High-stakes voting",
+        "description": "Run three parallel samples and take a majority vote on high-stakes turns.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "escalation_channel_enabled": {
+        "label":       "Escalation channel",
+        "description": "Pause and ask for human approval when a sensitive action is detected.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "firewall_enabled": {
+        "label":       "Prompt firewall",
+        "description": "Scan every turn for prompt-injection patterns before processing.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "guardrails_enabled": {
+        "label":       "Guardrails",
+        "description": "Apply output safety checks after each assistant turn.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "debate_enabled": {
+        "label":       "Adversarial debate",
+        "description": "Run a critic pass that challenges the first response on high-stakes turns.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "debate_only_high_stakes": {
+        "label":       "Debate on high-stakes turns only",
+        "description": "Limit the debate step to turns classified as high-stakes.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "sliding_window_risk_enabled": {
+        "label":       "Sliding-window risk ledger",
+        "description": "Track cumulative risk across turns instead of resetting each turn.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "sliding_window_risk_minutes": {
+        "label":       "Risk window duration",
+        "description": "Prune ledger entries older than this when the sliding window is enabled.",
+        "type":        "float",
+        "group":       "advanced",
+        "unit":        "minutes",
+        "min":         1.0,
+        "max":         60.0,
+    },
+    "model_canary_enabled": {
+        "label":       "Model canary",
+        "description": "Detect behavior drift when a new local model loads for the first time.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "reader_actor_split_enabled": {
+        "label":       "Reader/Actor split",
+        "description": "Separate retrieval and action into isolated pipeline stages (experimental).",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "camel_enabled": {
+        "label":       "CaMeL isolation",
+        "description": "Quarantine retrieved content from the privileged LLM (experimental).",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "studio_mode": {
+        "label":       "Studio mode",
+        "description": "Enable advanced multi-agent orchestration and parallel workers.",
+        "type":        "bool",
+        "group":       "advanced",
+    },
+    "qwen_thinking_global_budget_cap": {
+        "label":       "Qwen3 thinking budget cap",
+        "description": "Maximum thinking token budget for any single Qwen3 agent call.",
+        "type":        "int",
+        "group":       "advanced",
+        "unit":        "tokens",
+        "min":         512,
+        "max":         32768,
+    },
+    "voice_transcribe_timeout_sec": {
+        "label":       "Transcription timeout",
+        "description": "Maximum wall time for a Whisper transcription. Increase on very slow CPUs.",
+        "type":        "float",
+        "group":       "advanced",
+        "unit":        "seconds",
+        "min":         30.0,
+        "max":         3600.0,
+    },
+    "voice_synthesize_timeout_sec": {
+        "label":       "Synthesis timeout",
+        "description": "Maximum wall time for a Piper TTS run.",
+        "type":        "float",
+        "group":       "advanced",
+        "unit":        "seconds",
+        "min":         10.0,
+        "max":         600.0,
+    },
 }
 
 
@@ -617,6 +908,20 @@ GROUPS_META: list[dict] = [
      "description": "Where to find Ollama, LM Studio, and the bundled llama.cpp server."},
     {"id": "budget",       "label": "Token budget & cost",
      "description": "Per-conversation spending controls."},
+    {"id": "chat",         "label": "Chat",
+     "description": "System prompt and general chat behavior."},
+    {"id": "routing",      "label": "Smart routing",
+     "description": "Classifier that picks Claude vs local models per turn."},
+    {"id": "appearance",   "label": "Appearance",
+     "description": "Theme, token display, and other display preferences."},
+    {"id": "updates",      "label": "Updates",
+     "description": "How the app checks for and applies new versions."},
+    {"id": "rag",          "label": "Knowledge base",
+     "description": "Retrieval-augmented generation settings."},
+    {"id": "memory",       "label": "Memory",
+     "description": "How the agent stores and retrieves conversation memory."},
+    {"id": "advanced",     "label": "Advanced",
+     "description": "Feature flags and experimental capabilities."},
 ]
 
 

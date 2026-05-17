@@ -9,10 +9,12 @@ import {
   Voice,
   type ModelCatalogEntry,
   type PromptTemplate,
+  type SettingsManifest,
   type SettingsPayload,
   type VoiceAssetsStatus,
 } from "@/api/client";
 import { t } from "@/i18n";
+import { ManifestGroupSection } from "@/components/ManifestGroupSection";
 import { VoiceSetupModal } from "@/components/VoiceSetupModal";
 import { useAppStore } from "@/stores/appStore";
 
@@ -34,21 +36,22 @@ export function SettingsPanel() {
   const ready = useAppStore((s) => s.sidecarStatus?.status === "ready");
   const pushToast = useAppStore((s) => s.pushToast);
   const [config, setConfig] = useState<SettingsPayload | null>(null);
+  const [manifest, setManifest] = useState<SettingsManifest | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [verifying, setVerifying] = useState(false);
   const [routerStats, setRouterStats] = useState<RouterStats | null>(null);
-  // PR 17: voice setup modal + asset readiness probe.
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<VoiceAssetsStatus | null>(null);
-  // Layer B1: Claude model dropdown is sourced from
-  // /api/models/catalog so the renderer can't offer an id the backend
-  // price math doesn't know about.
   const [modelCatalog, setModelCatalog] = useState<ModelCatalogEntry[]>([]);
 
   const reload = async () => {
     try {
-      const fresh = await Settings.get();
+      const [fresh, mfst] = await Promise.all([
+        Settings.get(),
+        Settings.manifest(),
+      ]);
       setConfig(fresh);
+      setManifest(mfst);
     } catch (err) {
       pushToast({
         kind: "error",
@@ -80,8 +83,6 @@ export function SettingsPanel() {
       const rsp = await Models.catalog();
       setModelCatalog(rsp.models);
     } catch {
-      // Fall back to a free-text input if the catalog can't load — better
-      // than locking the user out of changing the model.
       setModelCatalog([]);
     }
   };
@@ -96,9 +97,9 @@ export function SettingsPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
-  const save = async (key: keyof SettingsPayload, value: unknown) => {
+  const save = async (key: string, value: unknown) => {
     try {
-      await Settings.save(String(key), value);
+      await Settings.save(key, value);
       reload();
     } catch (err) {
       pushToast({
@@ -130,17 +131,12 @@ export function SettingsPanel() {
     }
   };
 
-  // PR 17: voice toggle. When the user enables either voice flag and the
-  // backend reports the assets aren't ready yet, fire the setup modal so
-  // they don't get a confusing 503 the first time they hit the mic.
   const toggleVoiceInput = async (enabled: boolean) => {
     await save("voice_input_enabled", enabled);
     if (enabled) {
       const fresh = await Voice.assetsStatus().catch(() => null);
       setVoiceStatus(fresh);
-      if (fresh && !fresh.stt_ready) {
-        setVoiceModalOpen(true);
-      }
+      if (fresh && !fresh.stt_ready) setVoiceModalOpen(true);
     }
   };
 
@@ -149,13 +145,11 @@ export function SettingsPanel() {
     if (enabled) {
       const fresh = await Voice.assetsStatus().catch(() => null);
       setVoiceStatus(fresh);
-      if (fresh && !fresh.tts_ready) {
-        setVoiceModalOpen(true);
-      }
+      if (fresh && !fresh.tts_ready) setVoiceModalOpen(true);
     }
   };
 
-  if (!config) {
+  if (!config || !manifest) {
     return (
       <div className="p-6 text-ink-dim text-sm">
         {ready ? "Loading…" : "Waiting for backend…"}
@@ -170,6 +164,7 @@ export function SettingsPanel() {
         <p className="text-sm text-ink-dim">API keys, model selection, routing.</p>
       </header>
 
+      {/* ── API key (hand-coded: secret field + verify flow) ─────────────── */}
       <section className="card">
         <h3 className="font-semibold mb-2">Anthropic API key</h3>
         <div className="text-sm text-ink-dim mb-2">
@@ -191,6 +186,7 @@ export function SettingsPanel() {
         </div>
       </section>
 
+      {/* ── Model (hand-coded: catalog dropdown) ─────────────────────────── */}
       <section className="card">
         <h3 className="font-semibold mb-2">Model</h3>
         <label className="label">Claude model</label>
@@ -204,9 +200,6 @@ export function SettingsPanel() {
               save("claude_model", next);
             }}
           >
-            {/* If the saved model isn't in the catalog (e.g. older
-                install, custom id), keep it visible at the top so the
-                user isn't silently switched. */}
             {modelCatalog.find((m) => m.id === config.claude_model)
               ? null
               : (
@@ -221,8 +214,6 @@ export function SettingsPanel() {
             ))}
           </select>
         ) : (
-          // Catalog failed to load — fall back to the legacy free-text
-          // input so a transient API failure doesn't strand the user.
           <input
             className="input"
             value={config.claude_model}
@@ -234,83 +225,15 @@ export function SettingsPanel() {
         )}
       </section>
 
-      <section className="card">
-        <h3 className="font-semibold mb-2">Routing</h3>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={!!config.routing_enabled}
-            onChange={(e) => save("routing_enabled", e.target.checked)}
-          />
-          <span className="text-sm">
-            Smart routing (uncertainty-aware classifier picks Claude vs local)
-          </span>
-        </label>
-      </section>
-
+      {/* ── Manifest-driven sections ──────────────────────────────────────── */}
+      <ManifestGroupSection groupId="routing"    manifest={manifest} onSave={save} />
       <RoutingPerformanceSection stats={routerStats} />
+      <ManifestGroupSection groupId="local_models" manifest={manifest} onSave={save} />
+      <ManifestGroupSection groupId="updates"    manifest={manifest} onSave={save} />
+      <ManifestGroupSection groupId="budget"     manifest={manifest} onSave={save} />
+      <ManifestGroupSection groupId="appearance" manifest={manifest} onSave={save} />
 
-      <section className="card">
-        <h3 className="font-semibold mb-2">Local models</h3>
-        <label className="label">Ollama URL</label>
-        <input
-          className="input mb-2"
-          value={config.ollama_url}
-          onChange={(e) => setConfig({ ...config, ollama_url: e.target.value })}
-          onBlur={() => save("ollama_url", config.ollama_url)}
-        />
-        <label className="label">LM Studio URL</label>
-        <input
-          className="input"
-          value={config.lm_studio_url}
-          onChange={(e) =>
-            setConfig({ ...config, lm_studio_url: e.target.value })
-          }
-          onBlur={() => save("lm_studio_url", config.lm_studio_url)}
-        />
-      </section>
-
-      <section className="card">
-        <h3 className="font-semibold mb-2">Updates</h3>
-        <div className="flex flex-col gap-2" role="radiogroup" aria-label="Update mechanism">
-          {([
-            {
-              value: "auto",
-              label: "Automatic (recommended)",
-              hint: "Download and install new versions in the background. Asks before restarting.",
-            },
-            {
-              value: "manual",
-              label: "Manual",
-              hint: "Notify me when a new version is out and open the download page so I can install it myself.",
-            },
-            {
-              value: "off",
-              label: "Off",
-              hint: "Never check for updates.",
-            },
-          ] as const).map((opt) => (
-            <label key={opt.value} className="flex items-start gap-2">
-              <input
-                type="radio"
-                name="update_mechanism"
-                className="mt-1"
-                checked={(config.update_mechanism ?? "auto") === opt.value}
-                onChange={() => save("update_mechanism", opt.value)}
-              />
-              <span className="text-sm">
-                <div>{opt.label}</div>
-                <div className="text-xs text-ink-dim">{opt.hint}</div>
-              </span>
-            </label>
-          ))}
-        </div>
-        <p className="mt-2 text-xs text-ink-dim">
-          Manual mode is useful if automatic updates fail on your machine
-          because the app is unsigned.
-        </p>
-      </section>
-
+      {/* ── Voice (hand-coded: asset status + modal trigger) ─────────────── */}
       <section className="card" data-testid="settings-voice-section">
         <h3 className="font-semibold mb-2">Voice</h3>
         <p className="text-sm text-ink-dim mb-3">
@@ -431,24 +354,21 @@ export function SettingsPanel() {
         }}
       />
 
+      {/* ── System prompt (hand-coded: template picker sub-component) ─────── */}
       <section className="card">
         <h3 className="font-semibold mb-2">System prompt</h3>
-        <textarea
-          className="input min-h-[120px] font-mono text-xs"
-          value={config.system_prompt}
-          onChange={(e) =>
-            setConfig({ ...config, system_prompt: e.target.value })
-          }
-          onBlur={() => save("system_prompt", config.system_prompt)}
-        />
+        <ManifestGroupSection groupId="chat" manifest={manifest} onSave={save} />
         <SystemPromptTemplatesPicker
-          onApply={(tmpl) => {
-            setConfig({ ...config, system_prompt: tmpl.body });
-            save("system_prompt", tmpl.body);
-          }}
+          onApply={(tmpl) => save("system_prompt", tmpl.body)}
         />
       </section>
 
+      {/* ── New manifest-driven groups ────────────────────────────────────── */}
+      <ManifestGroupSection groupId="rag"      manifest={manifest} onSave={save} />
+      <ManifestGroupSection groupId="memory"   manifest={manifest} onSave={save} />
+      <ManifestGroupSection groupId="advanced" manifest={manifest} onSave={save} />
+
+      {/* ── Troubleshooting ───────────────────────────────────────────────── */}
       <section className="card">
         <h3 className="font-semibold mb-2">Troubleshooting</h3>
         <div className="space-y-2">
@@ -486,7 +406,7 @@ export function SettingsPanel() {
   );
 }
 
-// ── PR 18: pick a saved system_prompt template as the default ──────────────
+// ── System prompt template picker ─────────────────────────────────────────────
 
 interface SystemPromptTemplatesPickerProps {
   onApply: (tmpl: PromptTemplate) => void;
@@ -551,6 +471,8 @@ function SystemPromptTemplatesPicker({
     </div>
   );
 }
+
+// ── Routing performance stats ─────────────────────────────────────────────────
 
 function RoutingPerformanceSection({ stats }: { stats: RouterStats | null }) {
   if (!stats || stats.total_exchanges === 0) {

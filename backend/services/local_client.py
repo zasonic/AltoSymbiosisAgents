@@ -95,6 +95,12 @@ class LocalClient(LLMClient):
         # at the persisted port (read from paths.bundled_server_port_file)
         # so that a sidecar restart doesn't lose the connection.
         self._bundled_server: object | None = None
+
+    def _inference_timeout(self) -> int:
+        try:
+            return int(self._settings.get("local_inference_timeout_sec", 120))
+        except (TypeError, ValueError):
+            return 120
         # QLPT Stage 1: Ollama logprobs support is gated by server version.
         # Probe /api/version once per session and cache the result so every
         # unified-path call doesn't pay the round trip. None = not probed yet.
@@ -505,7 +511,7 @@ class LocalClient(LLMClient):
         }
         try:
             if b == "ollama":
-                r = requests.post(url + "/api/chat", json=payload, timeout=120)
+                r = requests.post(url + "/api/chat", json=payload, timeout=self._inference_timeout())
                 r.raise_for_status()
                 return r.json().get("message", {}).get("content", _FALLBACK)
             # LM Studio / bundled don't speak Ollama's image protocol.
@@ -514,7 +520,7 @@ class LocalClient(LLMClient):
                 "chat_with_images: backend %s does not support images; "
                 "falling back to text-only.", b,
             )
-            r = requests.post(url + "/v1/chat/completions", json=payload, timeout=120)
+            r = requests.post(url + "/v1/chat/completions", json=payload, timeout=self._inference_timeout())
             r.raise_for_status()
             return r.json()["choices"][0]["message"]["content"]
         except Exception as exc:
@@ -550,11 +556,11 @@ class LocalClient(LLMClient):
                    "max_tokens": max_tokens, "stream": False}
         try:
             if b == "ollama":
-                r = requests.post(url + "/api/chat", json=payload, timeout=120)
+                r = requests.post(url + "/api/chat", json=payload, timeout=self._inference_timeout())
                 r.raise_for_status()
                 return r.json().get("message", {}).get("content", _FALLBACK)
             else:
-                r = requests.post(url + "/v1/chat/completions", json=payload, timeout=120)
+                r = requests.post(url + "/v1/chat/completions", json=payload, timeout=self._inference_timeout())
                 r.raise_for_status()
                 return r.json()["choices"][0]["message"]["content"]
         except Exception as exc:
@@ -575,11 +581,11 @@ class LocalClient(LLMClient):
                    "max_tokens": max_tokens, "stream": False}
         try:
             if b == "ollama":
-                r = requests.post(url + "/api/chat", json=payload, timeout=120)
+                r = requests.post(url + "/api/chat", json=payload, timeout=self._inference_timeout())
                 r.raise_for_status()
                 return r.json().get("message", {}).get("content", _FALLBACK)
             else:
-                r = requests.post(url + "/v1/chat/completions", json=payload, timeout=120)
+                r = requests.post(url + "/v1/chat/completions", json=payload, timeout=self._inference_timeout())
                 r.raise_for_status()
                 return r.json()["choices"][0]["message"]["content"]
         except Exception as exc:
@@ -607,7 +613,7 @@ class LocalClient(LLMClient):
         endpoint = "/api/chat" if b == "ollama" else "/v1/chat/completions"
         full = ""
         try:
-            with requests.post(url + endpoint, json=payload, stream=True, timeout=120) as resp:
+            with requests.post(url + endpoint, json=payload, stream=True, timeout=self._inference_timeout()) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():
                     if not line:
@@ -772,7 +778,7 @@ class LocalClient(LLMClient):
                 "options": {"num_predict": max_tokens},
             }
             try:
-                r = requests.post(url + "/api/chat", json=payload, timeout=120)
+                r = requests.post(url + "/api/chat", json=payload, timeout=self._inference_timeout())
                 r.raise_for_status()
                 body = r.json()
                 text = body.get("message", {}).get("content", _FALLBACK)
@@ -794,7 +800,7 @@ class LocalClient(LLMClient):
             "logprobs": True, "top_logprobs": 1,
         }
         try:
-            r = requests.post(url + "/v1/chat/completions", json=payload, timeout=120)
+            r = requests.post(url + "/v1/chat/completions", json=payload, timeout=self._inference_timeout())
             r.raise_for_status()
             body = r.json()
             text = body["choices"][0]["message"]["content"]
@@ -855,7 +861,7 @@ class LocalClient(LLMClient):
         logprobs: list[float] = []
         try:
             with requests.post(
-                url + endpoint, json=payload, stream=True, timeout=120,
+                url + endpoint, json=payload, stream=True, timeout=self._inference_timeout(),
             ) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():

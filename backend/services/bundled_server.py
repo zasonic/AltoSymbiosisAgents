@@ -261,7 +261,7 @@ class BundledServer:
         bytes_total = int(entry["expected_size_bytes"]) or 0
 
         try:
-            with _requests.get(url, stream=True, timeout=_DOWNLOAD_TIMEOUT_SEC) as resp:
+            with _requests.get(url, stream=True, timeout=int(self._settings.get("bundled_download_timeout_sec", _DOWNLOAD_TIMEOUT_SEC))) as resp:
                 resp.raise_for_status()
                 # Some HF redirects don't include Content-Length; fall back
                 # to the catalog-supplied size for the progress denominator.

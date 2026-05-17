@@ -191,6 +191,7 @@ export interface SettingsPayload {
 
 export type ManifestFieldType =
   | "string"
+  | "textarea"
   | "url"
   | "int"
   | "float"

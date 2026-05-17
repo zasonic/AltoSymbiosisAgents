@@ -484,7 +484,7 @@ class VoiceService:
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    timeout=_TRANSCRIBE_TIMEOUT_SEC,
+                    timeout=int(self._settings.get("voice_transcribe_timeout_sec", _TRANSCRIBE_TIMEOUT_SEC)),
                     creationflags=creation_flags,
                 )
             except subprocess.TimeoutExpired as exc:
@@ -559,7 +559,7 @@ class VoiceService:
                 input=text.encode("utf-8"),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=_SYNTHESIZE_TIMEOUT_SEC,
+                timeout=int(self._settings.get("voice_synthesize_timeout_sec", _SYNTHESIZE_TIMEOUT_SEC)),
                 creationflags=creation_flags,
             )
         except subprocess.TimeoutExpired as exc:
