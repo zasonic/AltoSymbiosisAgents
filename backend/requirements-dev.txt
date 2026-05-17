@@ -13,6 +13,12 @@
 # silently un-fix Bugs 4/5/6/7.
 
 pytest>=8.0.0,<10.0.0
+# pytest-asyncio supplies @pytest.mark.asyncio for tests/test_sse_events.py.
+# Previously misfiled under requirements.txt (the lite production bundle) — the
+# tests.yml gate masked the misfiling because it installs both files, but
+# release.yml only installs the package (`pip install .`) + this file, which
+# is how the broken v1.0.0 first attempt surfaced the gap.
+pytest-asyncio>=0.23.0,<2.0.0
 hypothesis>=6.100.0,<7.0.0
 httpx>=0.27.0,<0.30.0  # required by fastapi.testclient in route tests
 vulture>=2.10,<3.0    # Layer 4.2 dead-code gate

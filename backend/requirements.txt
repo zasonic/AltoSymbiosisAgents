@@ -44,8 +44,3 @@ rank-bm25>=0.2.2
 # Linux). Keeps the legacy keyring contract used by core/settings.py and
 # services/mcp_credentials.py.
 keyring>=24.0.0
-
-# ── Dev / test ────────────────────────────────────────────────────────────────
-# Not bundled into the PyInstaller spec; installed separately for `pytest`.
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
