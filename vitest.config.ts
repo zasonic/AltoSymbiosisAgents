@@ -14,5 +14,6 @@ export default defineConfig({
     include: ["desktop-ui/**/*.test.{ts,tsx}", "desktop-shell/**/*.test.ts"],
     environment: "jsdom",
     globals: false,
+    setupFiles: ["./dev/vitest-setup.ts"],
   },
 });
