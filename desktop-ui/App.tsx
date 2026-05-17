@@ -1,30 +1,60 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 
 import { Escalation, Memory, Settings, System, resetSidecarInfo } from "@/api/client";
 import { subscribeEvents } from "@/api/sse";
 import { t } from "@/i18n";
-import { AgentPanel } from "@/components/AgentPanel";
 import { BootstrapWizard } from "@/components/BootstrapWizard";
 import { CanaryAlertModal } from "@/components/CanaryAlertModal";
 import { ChatView } from "@/components/ChatView";
-import { DiagnosticsPanel } from "@/components/DiagnosticsPanel";
 import { EscalationModal } from "@/components/EscalationModal";
-import { EscalationPanel } from "@/components/EscalationPanel";
 import { FirstRunWizard } from "@/components/FirstRunWizard";
-import { McpPanel } from "@/components/McpPanel";
-import { MemoryPanel } from "@/components/MemoryPanel";
-import { MemoryReviewPanel } from "@/components/MemoryReviewPanel";
-import { ModelBrowser } from "@/components/ModelBrowser";
-import { PromptLibraryPanel } from "@/components/PromptLibraryPanel";
-import { PromptPanel } from "@/components/PromptPanel";
-import { RagPanel } from "@/components/RagPanel";
 import { SafetyPanel } from "@/components/SafetyPanel";
-import { SecurityPanel } from "@/components/SecurityPanel";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { Sidebar } from "@/components/Sidebar";
 import { StatusBar } from "@/components/StatusBar";
 import { UpdateBanner } from "@/components/UpdateBanner";
-import { UsagePanel } from "@/components/UsagePanel";
+
+// Heavy / rarely-active panels are code-split so the initial bundle only
+// loads the chat-path essentials. Each panel is shown only when the user
+// switches to its view (Sidebar + Studio Mode toggle); the lazy chunk
+// downloads on demand. Keep ChatView / Sidebar / StatusBar / SettingsPanel
+// eager because they are the hot path or always rendered.
+const AgentPanel = lazy(() =>
+  import("@/components/AgentPanel").then((m) => ({ default: m.AgentPanel })),
+);
+const DiagnosticsPanel = lazy(() =>
+  import("@/components/DiagnosticsPanel").then((m) => ({ default: m.DiagnosticsPanel })),
+);
+const EscalationPanel = lazy(() =>
+  import("@/components/EscalationPanel").then((m) => ({ default: m.EscalationPanel })),
+);
+const McpPanel = lazy(() =>
+  import("@/components/McpPanel").then((m) => ({ default: m.McpPanel })),
+);
+const MemoryPanel = lazy(() =>
+  import("@/components/MemoryPanel").then((m) => ({ default: m.MemoryPanel })),
+);
+const MemoryReviewPanel = lazy(() =>
+  import("@/components/MemoryReviewPanel").then((m) => ({ default: m.MemoryReviewPanel })),
+);
+const ModelBrowser = lazy(() =>
+  import("@/components/ModelBrowser").then((m) => ({ default: m.ModelBrowser })),
+);
+const PromptLibraryPanel = lazy(() =>
+  import("@/components/PromptLibraryPanel").then((m) => ({ default: m.PromptLibraryPanel })),
+);
+const PromptPanel = lazy(() =>
+  import("@/components/PromptPanel").then((m) => ({ default: m.PromptPanel })),
+);
+const RagPanel = lazy(() =>
+  import("@/components/RagPanel").then((m) => ({ default: m.RagPanel })),
+);
+const SecurityPanel = lazy(() =>
+  import("@/components/SecurityPanel").then((m) => ({ default: m.SecurityPanel })),
+);
+const UsagePanel = lazy(() =>
+  import("@/components/UsagePanel").then((m) => ({ default: m.UsagePanel })),
+);
 import {
   useAppStore,
   type CanaryAlert,
@@ -444,20 +474,22 @@ export function App() {
         <Sidebar />
         <main className="flex-1 min-w-0 overflow-hidden">
           {view === "chat" && <ChatView />}
-          {view === "agents" && <AgentPanel />}
-          {view === "rag" && <RagPanel />}
-          {view === "memory" && <MemoryPanel />}
-          {view === "memory_review" && <MemoryReviewPanel />}
-          {view === "models" && <ModelBrowser />}
-          {view === "prompts" && <PromptPanel />}
-          {view === "saved_prompts" && <PromptLibraryPanel />}
-          {view === "mcp" && <McpPanel />}
-          {view === "security" && <SecurityPanel />}
           {view === "safety" && <SafetyPanel />}
-          {view === "usage" && <UsagePanel />}
           {view === "settings" && <SettingsPanel />}
-          {view === "diagnostics" && <DiagnosticsPanel />}
-          {view === "escalations" && <EscalationPanel />}
+          <Suspense fallback={null}>
+            {view === "agents" && <AgentPanel />}
+            {view === "rag" && <RagPanel />}
+            {view === "memory" && <MemoryPanel />}
+            {view === "memory_review" && <MemoryReviewPanel />}
+            {view === "models" && <ModelBrowser />}
+            {view === "prompts" && <PromptPanel />}
+            {view === "saved_prompts" && <PromptLibraryPanel />}
+            {view === "mcp" && <McpPanel />}
+            {view === "security" && <SecurityPanel />}
+            {view === "usage" && <UsagePanel />}
+            {view === "diagnostics" && <DiagnosticsPanel />}
+            {view === "escalations" && <EscalationPanel />}
+          </Suspense>
         </main>
       </div>
 
