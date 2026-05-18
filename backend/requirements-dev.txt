@@ -22,8 +22,9 @@ pytest-asyncio>=0.23.0,<2.0.0
 hypothesis>=6.100.0,<7.0.0
 httpx>=0.27.0,<0.30.0  # required by fastapi.testclient in route tests
 vulture>=2.10,<3.0    # Layer 4.2 dead-code gate
-# Layer C5: Pydantic → TS codegen. The Python side discovers BaseModels
-# and emits a combined JSON Schema; json-schema-to-typescript (Node, in
-# package.json devDependencies) does the second hop. The CI codegen job
-# fails when re-running generate_api_types.py would change the output.
-pydantic-to-typescript>=2.0.0,<3.0.0
+# Layer C5: OpenAPI → TS codegen. The Python side dumps FastAPI's live
+# app.openapi() schema; openapi-typescript (Node, in package.json
+# devDependencies) translates it to a .d.ts. The CI codegen job fails
+# when re-running generate_api_types.py would change the output. No
+# Python-side codegen library is needed any more — FastAPI ships the
+# OpenAPI generator.

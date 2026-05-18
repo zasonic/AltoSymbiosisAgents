@@ -161,6 +161,54 @@ class _AppContainer:
 
 # ── FastAPI factory ──────────────────────────────────────────────────────────
 
+# Single source of truth for app metadata. Surfaced as module constants so the
+# OpenAPI → TS codegen (build-scripts/generate_api_types.py) emits a schema
+# whose info block matches the running sidecar without re-stating the literals.
+OPENAPI_TITLE = "altosybioagents Sidecar"
+OPENAPI_VERSION = "1.0.0"
+
+# (dotted_module_under_backend, include_router_prefix). Order matches the
+# original explicit include_router() sequence so route enumeration in
+# /openapi.json stays byte-stable. The codegen script imports this list and
+# REGISTER_ROUTERS so the schema it dumps is the same one the live sidecar
+# serves.
+ROUTER_SPECS: tuple[tuple[str, str], ...] = (
+    ("routes.health", ""),
+    ("routes.echo", "/api"),
+    ("routes.events", "/api"),
+    ("routes.chat", "/api/chat"),
+    ("routes.conversations", "/api/conversations"),
+    ("routes.attachments", "/api"),
+    ("routes.agents", "/api/agents"),
+    ("routes.memory", "/api/memory"),
+    ("routes.rag", "/api/rag"),
+    ("routes.models", "/api/models"),
+    ("routes.settings", "/api/settings"),
+    ("routes.mcp", "/api/mcp"),
+    ("routes.lifecycle", "/api/lifecycle"),
+    ("routes.escalation", "/api/escalation"),
+    ("routes.prompts", "/api/prompts"),
+    ("routes.prompt_templates", "/api/prompt-templates"),
+    ("routes.safety", "/api/safety"),
+    ("routes.system", "/api/system"),
+    ("routes.usage", "/api/usage"),
+    ("routes.voice", "/api/voice"),
+)
+
+
+def register_routers(app: FastAPI) -> None:
+    """Wire every backend router onto ``app``. Single source of truth shared by
+    build_app() (the runtime path) and build-scripts/generate_api_types.py
+    (the OpenAPI → TS codegen). Add a router by appending to ROUTER_SPECS."""
+    import importlib
+    for dotted, prefix in ROUTER_SPECS:
+        module = importlib.import_module(dotted)
+        if prefix:
+            app.include_router(module.router, prefix=prefix)
+        else:
+            app.include_router(module.router)
+
+
 def build_app(token: str, user_data: Path | None) -> tuple[FastAPI, _AppContainer]:
     container = _AppContainer(user_data)
 
@@ -180,7 +228,7 @@ def build_app(token: str, user_data: Path | None) -> tuple[FastAPI, _AppContaine
         yield
 
     app = FastAPI(
-        title="altosybioagents Sidecar", version="1.0.0", lifespan=_lifespan,
+        title=OPENAPI_TITLE, version=OPENAPI_VERSION, lifespan=_lifespan,
     )
 
     # CORS: Electron's renderer runs on file:// or http://localhost in dev.
@@ -212,50 +260,8 @@ def build_app(token: str, user_data: Path | None) -> tuple[FastAPI, _AppContaine
     app.state.container = container
     app.state.shutdown_event = asyncio.Event()
 
-    # Register routers
-    from routes import (
-        agents as agents_routes,
-        attachments as attachments_routes,
-        chat as chat_routes,
-        conversations as conversations_routes,
-        echo as echo_routes,
-        escalation as escalation_routes,
-        events as events_routes,
-        health as health_routes,
-        lifecycle as lifecycle_routes,
-        mcp as mcp_routes,
-        memory as memory_routes,
-        models as models_routes,
-        prompt_templates as prompt_templates_routes,
-        prompts as prompts_routes,
-        rag as rag_routes,
-        safety as safety_routes,
-        settings as settings_routes,
-        system as system_routes,
-        usage as usage_routes,
-        voice as voice_routes,
-    )
-
-    app.include_router(health_routes.router)
-    app.include_router(echo_routes.router, prefix="/api")
-    app.include_router(events_routes.router, prefix="/api")
-    app.include_router(chat_routes.router, prefix="/api/chat")
-    app.include_router(conversations_routes.router, prefix="/api/conversations")
-    app.include_router(attachments_routes.router, prefix="/api")
-    app.include_router(agents_routes.router, prefix="/api/agents")
-    app.include_router(memory_routes.router, prefix="/api/memory")
-    app.include_router(rag_routes.router, prefix="/api/rag")
-    app.include_router(models_routes.router, prefix="/api/models")
-    app.include_router(settings_routes.router, prefix="/api/settings")
-    app.include_router(mcp_routes.router, prefix="/api/mcp")
-    app.include_router(lifecycle_routes.router, prefix="/api/lifecycle")
-    app.include_router(escalation_routes.router, prefix="/api/escalation")
-    app.include_router(prompts_routes.router, prefix="/api/prompts")
-    app.include_router(prompt_templates_routes.router, prefix="/api/prompt-templates")
-    app.include_router(safety_routes.router, prefix="/api/safety")
-    app.include_router(system_routes.router, prefix="/api/system")
-    app.include_router(usage_routes.router, prefix="/api/usage")
-    app.include_router(voice_routes.router, prefix="/api/voice")
+    # Register routers (single source of truth: ROUTER_SPECS above).
+    register_routers(app)
 
     @app.post("/shutdown")
     async def _shutdown(request: Request) -> dict:

@@ -1,36 +1,39 @@
 """
-build-scripts/generate_api_types.py — Pydantic → TypeScript codegen.
+build-scripts/generate_api_types.py — OpenAPI → TypeScript codegen.
 
-Layer C5 of the architectural plan. Walks ``backend/routes/*.py``,
-collects every ``BaseModel`` subclass, and emits a single TS declaration
-file at ``desktop-ui/api/generated.d.ts`` containing the equivalent
-interfaces. Wired into CI so a Pydantic change that's not reflected in
-the renderer's hand-typed request shapes is caught at PR time instead
-of at integration time.
+Layer C5 of the architectural plan. Builds a bare FastAPI app with every
+backend router registered (via ``server.register_routers``), dumps its
+``app.openapi()`` schema to a temp JSON file, then runs
+``openapi-typescript`` against it to emit
+``desktop-ui/api/generated.d.ts``.
 
-Why a custom collector instead of just pointing pydantic2ts at a single
-module? The 56 BaseModels live across 13 route files
-(``routes/chat.py``, ``routes/settings.py``, …) — pydantic2ts wants
-one module path. We write a small index module that re-exports every
-BaseModel under a stable name, then hand THAT to pydantic2ts.
+Why this is better than the previous walk-the-BaseModels approach:
+  * The route table is the source of truth — adding a new ``BaseModel``
+    that the renderer should know about now means registering it as a
+    request or response model on a real endpoint, which is the thing
+    that makes it actually callable. The old codegen would silently
+    include any class in the allowlisted modules whether or not it was
+    exposed.
+  * openapi-typescript emits ``paths`` types alongside ``components.schemas``,
+    so future call sites can pin both request bodies and response shapes
+    against the live wire contract.
+  * One toolchain (npx openapi-typescript) replaces the previous two
+    (pydantic2ts + json-schema-to-typescript).
 
-Run locally:
+CI fails when re-running this script would change the output (drift gate
+in .github/workflows/tests.yml). Operators regenerate locally and commit
+the diff alongside the underlying schema change:
+
     python build-scripts/generate_api_types.py
-
-CI fails when the regenerated file would change. Operators regenerate
-locally and commit the diff alongside the underlying Pydantic edit.
-
-The set of source modules is intentionally allowlisted (``_SOURCE_MODULES``)
-rather than auto-discovered, so adding a new BaseModel to a route file
-that should NOT be exposed to the renderer (e.g. internal validation
-helpers) is a deliberate one-line edit, not an accidental schema leak.
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib
-import inspect
+import json
+import os
+import platform
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -40,109 +43,54 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_DIR = REPO_ROOT / "backend"
 DEFAULT_OUTPUT = REPO_ROOT / "desktop-ui" / "api" / "generated.d.ts"
 
-# Allowlist: every route module that contains request/response Pydantic
-# models the renderer needs to know about. Add a module here when you
-# add a new route file with BaseModels the frontend will POST to. Skip
-# modules whose models are purely server-internal.
-_SOURCE_MODULES: tuple[str, ...] = (
-    "routes.agents",
-    "routes.chat",
-    "routes.echo",
-    "routes.lifecycle",
-    "routes.mcp",
-    "routes.memory",
-    "routes.prompt_templates",
-    "routes.prompts",
-    "routes.rag",
-    "routes.settings",
-    "routes.system",
-    "routes.voice",
-)
 
+def _build_openapi_only_app():
+    """Return a FastAPI instance with every router registered but no services
+    started. Sufficient for ``app.openapi()`` — route signatures and Pydantic
+    models are introspected at registration time, not at request time."""
+    # Make ``import server``, ``import routes.*`` resolve from backend/ whether
+    # we're invoked from the repo root or from build-scripts/.
+    if str(BACKEND_DIR) not in sys.path:
+        sys.path.insert(0, str(BACKEND_DIR))
 
-def _collect_models() -> list[type]:
-    """Return every concrete BaseModel subclass defined directly in the
-    allowlisted route modules. Models inherited from pydantic itself or
-    re-imported from elsewhere are skipped — we only want classes
-    *declared* in the routes layer."""
-    sys.path.insert(0, str(BACKEND_DIR))
-    from pydantic import BaseModel
+    from fastapi import FastAPI
 
-    seen: dict[str, type] = {}
-    for dotted in _SOURCE_MODULES:
-        module = importlib.import_module(dotted)
-        for name, obj in inspect.getmembers(module, inspect.isclass):
-            if obj is BaseModel:
-                continue
-            if not issubclass(obj, BaseModel):
-                continue
-            if obj.__module__ != module.__name__:
-                # Re-imported from somewhere else (e.g. ``from pydantic
-                # import BaseModel``). Skip — we only codegen the ones
-                # the route module *defines*.
-                continue
-            if name in seen and seen[name] is not obj:
-                raise RuntimeError(
-                    f"Pydantic class name collision: {name!r} is defined in both "
-                    f"{seen[name].__module__} and {obj.__module__}. Rename one before "
-                    f"running the codegen — TS doesn't namespace by source module.",
-                )
-            seen[name] = obj
-    return [seen[name] for name in sorted(seen)]
+    from server import OPENAPI_TITLE, OPENAPI_VERSION, register_routers
 
-
-def _write_index_module(models: list[type], dest: Path) -> None:
-    """Emit a synthetic Python file that imports every collected model so
-    pydantic2ts can point at one file. The file is throwaway — pydantic2ts
-    reads it once, discovers the models via inspect.getmembers, and emits
-    the TS."""
-    lines = [
-        '"""',
-        "AUTO-GENERATED by build-scripts/generate_api_types.py — do not edit.",
-        "Synthetic index module that re-exports every routes-layer Pydantic",
-        "BaseModel so pydantic2ts has a single discovery target.",
-        '"""',
-        "",
-    ]
-    # Group imports by source module so the file is human-readable on
-    # the rare occasion someone opens it during a CI failure.
-    by_module: dict[str, list[str]] = {}
-    for model in models:
-        by_module.setdefault(model.__module__, []).append(model.__name__)
-    for module_name in sorted(by_module):
-        names = sorted(by_module[module_name])
-        lines.append(f"from {module_name} import {', '.join(names)}")
-    lines.append("")
-    dest.write_text("\n".join(lines), encoding="utf-8")
+    app = FastAPI(title=OPENAPI_TITLE, version=OPENAPI_VERSION)
+    register_routers(app)
+    return app
 
 
 _HEADER = textwrap.dedent("""\
     /**
      * AUTO-GENERATED by build-scripts/generate_api_types.py — do not edit.
      *
-     * Pydantic request/response models from backend/routes/*.py translated
-     * into TypeScript interfaces. The CI gate in .github/workflows/tests.yml
-     * re-runs the codegen on every PR and fails if this file would change
-     * — keep it in sync by regenerating locally:
+     * OpenAPI schema dumped from backend/server.py:build_app() and translated
+     * into TypeScript via openapi-typescript. The CI gate in
+     * .github/workflows/tests.yml re-runs the codegen on every PR and fails
+     * if this file would change — keep it in sync by regenerating locally:
      *
      *     python build-scripts/generate_api_types.py
      *
-     * Then commit the diff alongside the underlying Pydantic change.
+     * Then commit the diff alongside the underlying schema change.
      */
 """)
 
 
 def _prepend_header(output: Path) -> None:
-    """Prepend our human-readable banner above whatever pydantic2ts /
-    json-schema-to-typescript emit. Their default banner says ``This file
-    was automatically generated`` but doesn't mention HOW to regenerate
-    — the operator confusion that causes is the one thing we can fix
-    in a one-line preamble."""
     body = output.read_text(encoding="utf-8")
-    # Strip the json-schema-to-typescript banner if present so we don't
-    # have two banners stacked. It always starts with /* tslint:disable */
-    # or /* eslint-disable */ followed by the upstream comment block.
     output.write_text(_HEADER + "\n" + body, encoding="utf-8")
+
+
+def _resolve_npx() -> str:
+    """Pick the right npx invocation for the current platform.
+
+    On Windows the executable is ``npx.cmd``; ``subprocess`` without
+    ``shell=True`` won't auto-resolve the ``.cmd`` extension. On POSIX
+    it's just ``npx``. Both CI (Ubuntu) and local Windows dev hit this.
+    """
+    return "npx.cmd" if platform.system() == "Windows" else "npx"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -152,37 +100,53 @@ def main(argv: list[str] | None = None) -> int:
         help="Path to write the generated .d.ts (default: %(default)s)",
     )
     parser.add_argument(
-        "--json2ts-cmd", default="npx --no-install json2ts",
+        "--openapi-typescript-cmd", default=None,
         help=(
-            "Command to invoke json-schema-to-typescript. Default uses "
-            "the locally-installed npm package; CI uses the same after "
-            "`npm ci`."
+            "Override the openapi-typescript binary. Default uses npx so the "
+            "locally-installed npm package is picked up after `npm ci`."
         ),
     )
     args = parser.parse_args(argv)
 
-    models = _collect_models()
-    if not models:
-        sys.stderr.write(
-            "No Pydantic models discovered. Check _SOURCE_MODULES in this "
-            "script — the route allowlist must point at the right modules.\n"
-        )
-        return 1
+    app = _build_openapi_only_app()
+    schema = app.openapi()
 
-    from pydantic2ts import generate_typescript_defs
+    # Sort keys so any future diff is debuggable; openapi-typescript walks the
+    # spec by key not by iteration order, so this only affects readability of
+    # the intermediate file, not the emitted TS.
+    schema_text = json.dumps(schema, sort_keys=True, indent=2)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        index_path = Path(tmpdir) / "_codegen_index.py"
-        _write_index_module(models, index_path)
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        generate_typescript_defs(
-            module=str(index_path),
-            output=str(args.output),
-            json2ts_cmd=args.json2ts_cmd,
-        )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+
+    # tempfile.NamedTemporaryFile + delete=False because openapi-typescript
+    # needs the file path to still exist when it opens it on Windows (where
+    # the original handle holds an exclusive lock).
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".openapi.json", delete=False, encoding="utf-8",
+    )
+    try:
+        tmp.write(schema_text)
+        tmp.flush()
+        tmp.close()
+
+        if args.openapi_typescript_cmd:
+            cmd = args.openapi_typescript_cmd.split() + [tmp.name, "--output", str(args.output)]
+        else:
+            cmd = [_resolve_npx(), "--no-install", "openapi-typescript", tmp.name, "--output", str(args.output)]
+
+        subprocess.run(cmd, check=True)
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
 
     _prepend_header(args.output)
-    print(f"Wrote {len(models)} interfaces to {args.output}")
+    n_paths = len(schema.get("paths", {}))
+    n_schemas = len(schema.get("components", {}).get("schemas", {}))
+    print(
+        f"Wrote {n_paths} path entries and {n_schemas} component schemas to {args.output}",
+    )
     return 0
 
 
