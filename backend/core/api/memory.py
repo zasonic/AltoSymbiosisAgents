@@ -40,7 +40,7 @@ class MemoryAPI(BaseAPI):
         return semantic_search.get_stale_memories(days=days)
 
     def delete_memory_entry(self, entry_id: str) -> dict:
-        """Delete a specific memory entry from both SQLite and ChromaDB."""
+        """Delete a specific memory entry from both SQLite and the vector store."""
         ok = semantic_search.delete_memory_entry(entry_id)
         return {"ok": ok}
 

@@ -283,14 +283,14 @@ def search_documents_hybrid(
     method: str = "hybrid",
 ) -> list[dict]:
     """
-    Hybrid document search: BM25 + ChromaDB vector search + Reciprocal Rank Fusion.
+    Hybrid document search: BM25 + sqlite-vec vector search + Reciprocal Rank Fusion.
 
     Parameters
     ----------
     query_text : Search query
     top_k      : Results to return
-    doc_type   : Optional ChromaDB filter
-    method     : "hybrid" (default) | "vector" (ChromaDB only) | "bm25" (BM25 only)
+    doc_type   : Optional doc_type filter
+    method     : "hybrid" (default) | "vector" (sqlite-vec only) | "bm25" (BM25 only)
 
     Returns
     -------

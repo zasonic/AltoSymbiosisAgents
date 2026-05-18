@@ -63,7 +63,7 @@ class MemoryContext:
     The four fields cover the three memory tiers plus the rolling buffer:
       - ``recent_messages``: short-term in-memory deque (per conversation)
       - ``session_facts``:   per-conversation extracted facts (SQLite)
-      - ``rag_chunks``:      RAG retrieval results (chromadb-equivalent)
+      - ``rag_chunks``:      RAG retrieval results (BM25 + sqlite-vec hybrid)
       - ``memories``:        long-term cross-session memories
     """
     recent_messages: list = field(default_factory=list)

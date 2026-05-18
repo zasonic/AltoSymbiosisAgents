@@ -1,14 +1,14 @@
 """
-services/rag_index.py — RAG index (thin wrapper over semantic_search / ChromaDB).
+services/rag_index.py — RAG index (thin wrapper over semantic_search / sqlite-vec).
 
 Stage 2 consolidation:
-  ChromaDB (semantic_search.py) is now the single document store.
+  semantic_search.py (fastembed + sqlite-vec) is the single document store.
   This module is kept as a compatibility shim so that all call-sites
   (api.py, memory.py, health_monitor.py) continue to work unchanged.
 
   On first startup, if a legacy .npz index exists alongside a
-  _chunks.json file, the chunks are re-ingested into ChromaDB and the
-  old files are deleted to avoid double-indexing.
+  _chunks.json file, the chunks are re-ingested into the vector store and
+  the old files are deleted to avoid double-indexing.
 
   search() now returns (text, score) tuples instead of plain strings
   so that memory.py's similarity gating can filter low-relevance chunks.
@@ -40,12 +40,12 @@ class RAGIndex:
       add_file(file_path)
       add_text(text, source)
       search(query, top_k) -> list[(text, score)] or list[str] (backward-compat)
-      save(path)   — no-op (ChromaDB handles persistence)
+      save(path)   — no-op (sqlite-vec handles persistence)
       load(path)   — migrates legacy .npz on first call
       clear()
       chunk_count()
 
-    All storage is delegated to semantic_search.py / ChromaDB.
+    All storage is delegated to semantic_search.py (fastembed + sqlite-vec).
     The SentenceTransformer model is shared via the module-level
     _shared_st_model set in api.py.
     """
@@ -66,7 +66,7 @@ class RAGIndex:
         self._semantic = None  # set lazily when semantic_search is available
 
     def _get_semantic(self):
-        """Lazy import so that the module can be imported without chromadb installed."""
+        """Lazy import so that the module can be imported without sqlite-vec installed."""
         if self._semantic is not None:
             return self._semantic
         try:
@@ -100,7 +100,7 @@ class RAGIndex:
         on_progress=None,
     ) -> None:
         """
-        Walk folder recursively, read matching files, chunk and ingest into ChromaDB.
+        Walk folder recursively, read matching files, chunk and ingest into the vector store.
         on_progress: optional callable(status_str, pct_int) for UI feedback.
         """
         if extensions is None:
@@ -243,14 +243,14 @@ class RAGIndex:
 
     def save(self, path: Path) -> None:
         """
-        No-op: ChromaDB handles its own persistence.
+        No-op: sqlite-vec handles its own persistence.
         Kept for API compatibility with call-sites that call save().
         """
-        log.debug("RAGIndex.save() called — ChromaDB handles persistence; no file written.")
+        log.debug("RAGIndex.save() called — sqlite-vec handles persistence; no file written.")
 
     def load(self, path: Path) -> None:
         """
-        Migrate a legacy .npz + _chunks.json index into ChromaDB on first call,
+        Migrate a legacy .npz + _chunks.json index into sqlite-vec on first call,
         then delete the old files so they are not re-ingested on subsequent starts.
         """
         path = Path(path)
@@ -260,7 +260,7 @@ class RAGIndex:
             return  # Nothing to migrate
 
         log.info(
-            "RAGIndex: legacy .npz index found at %s — migrating to ChromaDB.", path
+            "RAGIndex: legacy .npz index found at %s — migrating to sqlite-vec.", path
         )
         try:
             chunks: list[str] = []
@@ -279,7 +279,7 @@ class RAGIndex:
                     except Exception as exc:
                         log.warning("RAGIndex migration: chunk ingest failed: %s", exc)
                 log.info(
-                    "RAGIndex: migrated %d legacy chunks into ChromaDB.", len(chunks)
+                    "RAGIndex: migrated %d legacy chunks into sqlite-vec.", len(chunks)
                 )
 
             # Remove legacy files so we don't re-ingest on next startup

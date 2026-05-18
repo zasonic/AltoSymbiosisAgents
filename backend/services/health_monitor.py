@@ -67,17 +67,17 @@ def check_local_models(ollama_url: str, lmstudio_url: str) -> dict:
     }
 
 
-def check_rag_index(app_root: str) -> dict:
-    """Check RAG index chunk count via ChromaDB (the active document store)."""
+def check_rag_index() -> dict:
+    """Check RAG index chunk count via the active vector store (sqlite-vec)."""
     try:
         from services import semantic_search
         if not semantic_search.is_available():
             return {"status": "warn",
                     "message": "Semantic search is not initialised — RAG unavailable. "
-                               "Install chromadb and sentence-transformers if needed."}
+                               "Install fastembed and sqlite-vec if needed."}
         count = semantic_search.document_count()
         if count > 0:
-            return {"status": "pass", "message": f"RAG index loaded with {count} document chunks in ChromaDB."}
+            return {"status": "pass", "message": f"RAG index loaded with {count} document chunks."}
         return {"status": "warn",
                 "message": "RAG index is empty — no documents indexed yet. Add docs in the Documents view."}
     except Exception as exc:
@@ -143,7 +143,7 @@ def check_all(
     checks = {
         "Disk space":     lambda: check_disk_space(app_root),
         "Local models":   lambda: check_local_models(ollama_url, lmstudio_url),
-        "RAG index":      lambda: check_rag_index(app_root),
+        "RAG index":      check_rag_index,
         "Memory":         check_memory_health,
         "Git":            check_git,
     }

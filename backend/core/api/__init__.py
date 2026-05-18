@@ -233,8 +233,8 @@ class API:
         """Start the slow services in a background thread.
 
         Call this from main.py after the window's `loaded` event fires. Heavy
-        work — sentence-transformers model load (~2-5s, or 60s+ on first-run
-        download), ChromaDB client construction (500ms-2s), background indexer
+        work — fastembed model load (~2-5s, or 60s+ on first-run
+        download), sqlite-vec connection setup (500ms-2s), background indexer
         thread start — all run here so the user sees a painted window within
         a second of launch instead of a blank PyWebView frame.
         """
