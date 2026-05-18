@@ -1,7 +1,74 @@
 # Handoff
 
-**Last commit:** _pending_ — `feat(orch): LangGraph StateGraph engine for ChatOrchestrator.send`
-**Branch:** `feat/langgraph-orchestrator` · **Pushed:** no
+**Last commit:** _pending_ — `fix(api): forward team_id through chat roster facade`
+**Branch:** `fix/roster-team-id-passthrough` · **Pushed:** no
+**Date:** 2026-05-18
+
+## What just shipped (this branch)
+
+**Bug fix — RosterPicker was 100% broken.** Every roster pick from the
+UI (solo agent, multi-agent ad-hoc, or saved team preset) was failing
+with HTTP 500, the frontend rolled back from the server, and the chip
+stayed reading "No agent" no matter what the user selected.
+
+Root cause: signature mismatch at the seam between `routes/chat.py` and
+the domain API facade. The route calls
+`get_api(request).chat_set_conversation_roster(cid, ids, team_id=body.team_id)`
+unconditionally (None when absent), but the thin facade method at
+[backend/core/api/__init__.py:830](backend/core/api/__init__.py#L830)
+was declared as `(self, conversation_id, agent_ids)` — no `team_id`
+parameter, and `team_id` not forwarded to the inner `ChatAPI` either.
+Every call raised
+`TypeError: chat_set_conversation_roster() got an unexpected keyword
+argument 'team_id'`. FastAPI returned 500; `applyRoster` in
+`ChatView.tsx` caught it, toasted, and re-fetched the unchanged
+conversation row.
+
+- **`backend/core/api/__init__.py`.** One-line signature fix: the
+  facade now accepts `team_id=None` and forwards it as a keyword to the
+  inner `ChatAPI.chat_set_conversation_roster`, matching the route's
+  call shape and the inner method's signature.
+- **`backend/tests/test_api_chat_roster_facade.py`** (new, 3 tests).
+  Pins the facade's kwargs forwarding (this is the seam that broke):
+  `team_id="t_42"` is forwarded verbatim, `team_id=None` (the implicit
+  default when the renderer omits it) is also forwarded, and the
+  route's exact call shape (`team_id=` keyword) doesn't raise. No
+  test covered this facade before — that's how the regression slipped.
+
+## Verified
+
+- `cd backend; python -m pytest tests/ -q` — **720 passed, 9 skipped,
+  13 deselected** in 140s (up from 717 baseline; +3 new facade tests,
+  all green).
+- Targeted subset:
+  `pytest tests/test_chat_orchestrator.py tests/test_pipeline.py
+  tests/test_layer_fences.py tests/test_api_chat_roster_facade.py -q`
+  → 92 passed.
+
+## Next up
+
+- Manual smoke-test of RosterPicker in the desktop UI: solo agent
+  pick, multi-agent ad-hoc, saved-team preset — all three should now
+  bind the conversation (chip reflects the pick, no error toast).
+- Resume the previously-planned work (Stage 2 #7 follow-up — the
+  AgentDojo + agentic-misalignment bench-driven default flip of
+  `orchestrator_engine="graph"`, or Stage 2 #8 ChatView decomposition).
+
+## Walls hit
+
+None. The fix is a single line plus a regression test against the
+exact seam. The bug had been live since the RosterPicker landed and
+went unnoticed because no test covered the `API` facade method
+(only the inner `ChatAPI` and the orchestrator's `update_conversation_roster`).
+
+---
+
+<!-- Earlier handoff content preserved below for cross-session reference. -->
+
+# Earlier session — `feat/langgraph-orchestrator` (commit `501f9f4`, merged in #17)
+
+**Last commit:** 501f9f4 — `feat(orch): LangGraph StateGraph engine for ChatOrchestrator.send`
+**Branch:** `feat/langgraph-orchestrator` · **Pushed:** yes (merged to main)
 **Date:** 2026-05-17
 
 ## What just shipped (this branch)
