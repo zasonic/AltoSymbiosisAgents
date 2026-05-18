@@ -54,3 +54,12 @@ keyring>=24.0.0
 # Pinned conservatively because LiteLLM ships breaking changes between
 # minor versions historically.
 litellm>=1.50.0,<2.0.0
+
+# ── Orchestrator control-flow graph ─────────────────────────────────────────
+# LangGraph 1.x StateGraph powers services/orchestrator_graph.py — the
+# Stage-2 #7 rewrite of ChatOrchestrator.send() as a node-and-edge graph.
+# Selected at runtime by the ``orchestrator_engine`` setting (default
+# "legacy"); both engines share the same downstream services (TurnLifecycle,
+# MemoryRecall, TurnRouter, SecurityGate, WorkerDispatch, EscalationLadder,
+# hub_router, governance, CaMeL, Reader/Actor split, voting).
+langgraph>=1.2,<2.0.0

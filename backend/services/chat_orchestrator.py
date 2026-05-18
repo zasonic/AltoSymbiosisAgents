@@ -1120,7 +1120,20 @@ class ChatOrchestrator:
 
         on_event(event_type, data_dict) — optional callback for structured
         progress events (route_decided, memory_recalled). Non-fatal.
+
+        Stage-2 #7: when ``orchestrator_engine == "graph"``, dispatch
+        into services/orchestrator_graph.run_turn_graph. Both engines
+        share the same downstream services; the choice is control-flow
+        only. Default ``"legacy"`` preserves existing behaviour.
         """
+        engine = self._settings.get("orchestrator_engine", "legacy")
+        if engine == "graph":
+            from services.orchestrator_graph import run_turn_graph
+            return run_turn_graph(
+                self, conversation_id, user_message, agent_id,
+                on_token=on_token, on_event=on_event,
+            )
+
         def _emit_event(event_type: str, data: dict) -> None:
             if on_event:
                 try:

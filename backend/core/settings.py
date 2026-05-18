@@ -220,6 +220,18 @@ SETTINGS_DEFAULTS: dict[str, tuple] = {
     # Reader proposed. Default False so existing behavior is preserved.
     "reader_actor_split_enabled":    (bool,  False),
 
+    # Stage-2 #7: LangGraph 1.2 StateGraph engine. Selects the control-flow
+    # implementation for ChatOrchestrator.send():
+    #   "legacy" — the imperative 800+-line body that has shipped since v5.
+    #   "graph"  — services/orchestrator_graph.py: same downstream services
+    #              (TurnLifecycle, MemoryRecall, TurnRouter, SecurityGate,
+    #              WorkerDispatch, EscalationLadder, hub_router, governance,
+    #              CaMeL, Reader/Actor split, voting), but composed as
+    #              LangGraph nodes + edges instead of straight-line code.
+    # Default "legacy" so existing behaviour is preserved until two clean
+    # weekly bench cycles (AgentDojo + agentic-misalignment) confirm parity.
+    "orchestrator_engine":           (str,   "legacy"),
+
     # QLPT Stage 1: logprob-derived margin-proxy quality scorer.
     # When True, EscalationLadder uses services.margin_proxy in place of
     # the self-score LLM call — but only when the worker actually
@@ -870,6 +882,13 @@ FIELD_METADATA: dict[str, dict] = {
         "description": "Separate retrieval and action into isolated pipeline stages (experimental).",
         "type":        "bool",
         "group":       "advanced",
+    },
+    "orchestrator_engine": {
+        "label":       "Orchestrator engine",
+        "description": "Control-flow implementation for the chat turn: legacy imperative or LangGraph StateGraph (experimental, same downstream services).",
+        "type":        "enum",
+        "group":       "advanced",
+        "options":     ["legacy", "graph"],
     },
     "camel_enabled": {
         "label":       "CaMeL isolation",
