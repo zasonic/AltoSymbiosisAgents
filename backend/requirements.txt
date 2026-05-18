@@ -44,3 +44,13 @@ rank-bm25>=0.2.2
 # Linux). Keeps the legacy keyring contract used by core/settings.py and
 # services/mcp_credentials.py.
 keyring>=24.0.0
+
+# ── Multi-provider LLM adapter (BYO-key path) ───────────────────────────────
+# LiteLLM normalises 100+ provider APIs (OpenAI / Gemini / Groq / Mistral /
+# DeepSeek / Grok / Cohere / Ollama, etc.) behind a single OpenAI-compatible
+# call. We expose it through a third LLMClient implementation
+# (services/llm_litellm_adapter.LiteLLMClient) so HubRouter.invoke() can
+# dispatch BYO-keyed traffic without rewriting ClaudeClient or LocalClient.
+# Pinned conservatively because LiteLLM ships breaking changes between
+# minor versions historically.
+litellm>=1.50.0,<2.0.0

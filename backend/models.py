@@ -24,6 +24,16 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+# Pydantic v2 is already a runtime dep (FastAPI). We use the BaseModel +
+# field validators here as the structured-output validator for the Reader's
+# JSON envelope — see ``_ReaderOutputSchema`` near ``ReaderOutput``. Imported
+# under aliases so the dataclass-heavy rest of this module isn't shadowed by
+# Pydantic's symbols.
+from pydantic import BaseModel as PydanticBaseModel
+from pydantic import Field as PydanticField
+from pydantic import ValidationError as PydanticValidationError
+from pydantic import field_validator as pydantic_field_validator
+
 
 # ── Improvement 1: Core data contracts (UNCHANGED) ────────────────────────────
 
@@ -587,6 +597,16 @@ class WorkerResult:
 # Phase 6: Hackett et al. (ACL 2025) Reader/Actor split. The Reader produces
 # this structured plan; the Actor executes against it without ever seeing the
 # raw user message or raw retrieved data.
+#
+# Atelier-plan Stage-1: the JSON contract is now declared as a Pydantic v2
+# BaseModel (``_ReaderOutputSchema`` below) which acts as the validator for
+# the Reader's structured output. The hand-rolled regex cleanup still runs
+# as a pre-pass to strip code fences and locate the JSON envelope inside
+# stray prose, but the type coercion + field-name discipline is delegated
+# to Pydantic. This is the "Pydantic AI as validator for structured output
+# shapes" step in the approved plan — the same Pydantic v2 layer Pydantic
+# AI uses internally, applied surgically without the wider Agent/Provider
+# stack.
 @dataclass(frozen=True)
 class ReaderOutput:
     intent:          str                      # what the user is asking
@@ -606,37 +626,92 @@ class ReaderOutput:
 
     @classmethod
     def from_raw(cls, raw: str) -> "ReaderOutput":
-        """Parse the Reader's JSON output. Tolerant of stray fences/prose."""
+        """Parse the Reader's JSON output. Tolerant of stray fences/prose.
+
+        Stage-1 Atelier: routes through the ``_ReaderOutputSchema`` Pydantic
+        v2 validator after a code-fence / JSON-envelope cleanup pass. The
+        validator does the per-field type coercion (string lists, intent
+        string) that previously lived in the inline ``_str_list`` helper.
+        On any structural failure we return an empty ``ReaderOutput`` so
+        the Actor still has a well-formed plan to execute against — the
+        Phase 6 contract is "no Reader plan" not "crash the turn."
+        """
         if not raw:
             return cls(intent="")
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.strip("`")
-            if "\n" in cleaned:
-                cleaned = cleaned.split("\n", 1)[1]
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start < 0 or end <= start:
+        envelope = _extract_json_envelope(raw)
+        if envelope is None:
             return cls(intent="")
         try:
-            d = json.loads(cleaned[start:end + 1])
-        except (TypeError, ValueError):
+            schema = _ReaderOutputSchema.model_validate_json(envelope)
+        except PydanticValidationError:
             return cls(intent="")
-        if not isinstance(d, dict):
-            return cls(intent="")
-
-        def _str_list(v) -> tuple[str, ...]:
-            if not isinstance(v, list):
-                return ()
-            return tuple(str(x) for x in v if isinstance(x, (str, int, float)))
-
         return cls(
-            intent=str(d.get("intent", "")),
-            constraints=_str_list(d.get("constraints")),
-            relevant_facts=_str_list(d.get("relevant_facts")),
-            proposed_tools=_str_list(d.get("proposed_tools")),
-            red_flags=_str_list(d.get("red_flags")),
+            intent=schema.intent,
+            constraints=tuple(schema.constraints),
+            relevant_facts=tuple(schema.relevant_facts),
+            proposed_tools=tuple(schema.proposed_tools),
+            red_flags=tuple(schema.red_flags),
         )
+
+
+def _extract_json_envelope(raw: str) -> Optional[str]:
+    """Return the ``{...}`` slice of ``raw`` or None when no envelope exists.
+
+    Strips a leading code fence (``` or ```json) when present, then locates
+    the outermost ``{ ... }`` so prose before or after the JSON is ignored.
+    Used by ``ReaderOutput.from_raw`` to feed the Pydantic validator a
+    self-contained JSON string.
+    """
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if "\n" in cleaned:
+            cleaned = cleaned.split("\n", 1)[1]
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    return cleaned[start:end + 1]
+
+
+class _ReaderOutputSchema(PydanticBaseModel):
+    """Pydantic v2 schema for the Reader's JSON output.
+
+    Lives next to ``ReaderOutput`` so the validator and the immutable
+    dataclass form stay in sync. The dataclass is the runtime contract
+    (frozen, tuple fields); this schema is the parse-time contract
+    (mutable lists, defaulting to empty, per-field validators that
+    silently drop ill-typed entries instead of failing the whole turn).
+    """
+
+    intent: str = ""
+    constraints: list[str] = PydanticField(default_factory=list)
+    relevant_facts: list[str] = PydanticField(default_factory=list)
+    proposed_tools: list[str] = PydanticField(default_factory=list)
+    red_flags: list[str] = PydanticField(default_factory=list)
+
+    @pydantic_field_validator("constraints", "relevant_facts", "proposed_tools", "red_flags", mode="before")
+    @classmethod
+    def _coerce_string_list(cls, value):
+        """Accept anything iterable; drop entries that aren't str/int/float.
+
+        The Reader is an LLM and occasionally emits ``["claim", {"k": "v"}]``
+        when it conflates facts with structured assertions. The previous
+        hand-rolled parser silently dropped the structured one; we preserve
+        that tolerance here so the field validation doesn't fail the turn.
+        """
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            return []
+        return [str(item) for item in value if isinstance(item, (str, int, float))]
+
+    @pydantic_field_validator("intent", mode="before")
+    @classmethod
+    def _coerce_intent(cls, value):
+        if value is None:
+            return ""
+        return str(value)
 
 
 def extract_handoff_packet(

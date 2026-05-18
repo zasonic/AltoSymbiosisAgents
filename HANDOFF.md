@@ -1,7 +1,112 @@
 # Handoff
 
-**Last commit:** _pending_ — `test(arch): add backend/core ↔ backend/routes import-fence gate`
-**Branch:** `feat/layer-fences-test` · **Pushed:** no
+**Last commit:** _pending_ — `feat(llm): LiteLLM adapter + Pydantic-validated ReaderOutput`
+**Branch:** `feat/litellm-pydantic-ai` · **Pushed:** no
+**Date:** 2026-05-17
+
+## What just shipped (this branch)
+
+**Stage 1 / item #3** of the Atelier-blueprint plan — the last open Stage-1
+item. Adds LiteLLM as a third `LLMClient` implementation for BYO-key
+providers (OpenAI / Gemini / Groq / Mistral / DeepSeek / Grok / Cohere /
+etc.) and moves the Reader's JSON parsing from hand-rolled regex onto a
+Pydantic v2 schema validator. Existing `ClaudeClient` and `LocalClient`
+are untouched.
+
+- **`backend/services/llm_litellm_adapter.py`** (new). `LiteLLMClient`
+  implements the `LLMClient` ABC: `chat_unified` / `stream_unified` /
+  `is_available` / `client_name`. System prompt is prepended as
+  `{"role":"system",…}` (OpenAI chat shape, matching `LocalClient`).
+  Imports `litellm` lazily so sidecars that never see a BYO-key turn
+  never pay the openai+tokenizers warm-up cost. `is_available` requires
+  both a model and a key so HubRouter fails closed when the third client
+  is misconfigured.
+- **`backend/services/hub_router.py`.** `HubRouter.__init__` accepts an
+  optional `litellm_client`. `invoke()` dispatches to it when
+  `decision.backend == "litellm"`; missing-client falls closed with an
+  errored `WorkerResult` rather than silently using Claude.
+  `_resolve_backend` recognises `"litellm"` as a model preference and as
+  a backend hint. `target_for` emits a `litellm`-typed `ExecutionTarget`
+  without the `local`-style 2048-token clamp.
+- **`backend/models.py`.** New `_ReaderOutputSchema(BaseModel)` Pydantic
+  v2 schema declares the JSON contract for the Reader's output, with
+  per-field validators that coerce `null → []`, drop entries that
+  aren't `str / int / float`, and ignore unknown keys. `ReaderOutput.from_raw`
+  now does a code-fence / JSON-envelope cleanup pass and hands the
+  envelope to `_ReaderOutputSchema.model_validate_json`. The dataclass
+  form (frozen, tuple fields) is preserved as the runtime contract.
+- **`backend/requirements.txt`.** Adds `litellm>=1.50.0,<2.0.0` to the
+  lite bundle (Pydantic v2 is already shipped via FastAPI; no new
+  Python-side dep for the structured-output validator).
+- **Tests.**
+  - `backend/tests/test_litellm_adapter.py` (new, 10 tests). Mocks
+    `litellm.completion` and pins: system-prompt prepending, empty-system
+    omission, missing-usage tolerance, provider-error sentinel,
+    streaming token accumulation + final-chunk usage, stream-error
+    fallback to non-streaming.
+  - `backend/tests/test_reader_output_schema.py` (new, 14 tests). Pins
+    cleanup tolerance (fences, surrounding prose, missing braces) AND
+    the new Pydantic schema (mixed-type lists, unknown fields, null
+    coercion, non-list-as-string drop, half-formed-JSON degradation).
+  - `backend/tests/test_hub_router.py` (extended, +9 tests). LiteLLM
+    dispatch (non-streaming + streaming + fail-closed), the new
+    `_resolve_backend` keyword, the new `target_for` litellm shape.
+
+## Verified
+
+- `cd backend; python -m pytest tests/ -q -x` — **706 passed, 9
+  skipped, 13 deselected** in 131.77s (up from 665 baseline; +14
+  schema + +10 adapter + +9 hub_router + … all green).
+- Plan-specified verification: `pytest tests/test_hub_router.py
+  tests/test_reader_actor_split.py tests/test_logprob_data_flow.py`
+  → 37 passed, 0 failed.
+- Layer-fence test still green (41 parametrized tests).
+- `npm run typecheck` clean.
+
+## Stage-1 status (post-this-PR)
+
+- **#3 Pydantic AI + LiteLLM** — DONE (this branch).
+- **#4 SignPath OSS code signing** — DEFERRED per scope decision.
+- **#5 openapi-typescript codegen** — DONE (merged PR #14).
+- **#6 Layer fence** — DONE (merged PR #15).
+
+Stage-1 is complete except for #4, which is gated on the SignPath
+Foundation OSS application.
+
+## Next up (per the approved plan)
+
+Stage 2 (Tier-2 surface refit):
+- **#7** LangGraph 1.2 `StateGraph` rewrite of the orchestrator,
+  preserving CaMeL / HandoffPacket / saga / challenger / ToM / voting /
+  governance / hub-router policy verbatim as nodes.
+- **#8** Decompose `ChatView.tsx` (2,762 LOC) into composed shadcn/ui
+  panels + TanStack Query hooks.
+- **#9** Devin-style Plan→Confirm→Execute→Critique drillable timeline
+  (extending the existing `_deriveThinkingTimeline`).
+- **#10** Visual TeamComposer replacing the 6-field `AgentPanel`.
+- **#11** Typed error envelopes across `backend/routes/*`.
+- **#12** Finish the bundled `llama-server` binary integration (resolve
+  the `TODO(engines)` in `backend/services/bundled_server.py`).
+
+## Walls hit
+
+None this session. Some intentional scope discipline: did NOT add
+`pydantic-ai` (the package) as a runtime dep this stage — the Reader's
+validator uses Pydantic v2 directly (the same layer Pydantic AI is
+built on). Adding the package will land naturally when Stage 2's
+LangGraph rewrite begins using `pydantic_ai.Agent` for typed agent
+flows. Also did NOT wire the LiteLLM client into Settings / UI — the
+adapter and HubRouter branch are infrastructure; the UI exposure is a
+focused follow-up.
+
+---
+
+<!-- Earlier handoff content preserved below for cross-session reference. -->
+
+# Earlier session — `feat/layer-fences-test` (commit `8ddac21`)
+
+**Last commit:** 8ddac21 — `test(arch): add backend/core ↔ backend/routes import-fence gate`
+**Branch:** `feat/layer-fences-test` · **Pushed:** yes
 **Date:** 2026-05-17
 
 ## What just shipped (this branch)

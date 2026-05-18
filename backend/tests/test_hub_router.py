@@ -248,6 +248,119 @@ class TestInvoke:
         assert result.had_error is True
         assert "[Error" in result.text
 
+    # ── Stage-1 (Atelier): LiteLLM as a third backend ────────────────────
+
+    def test_invoke_litellm_dispatches_to_third_client(
+        self, claude_mock, local_mock, settings,
+    ):
+        """When decision.backend is 'litellm', the LiteLLM client is called
+        and the Claude / Local clients are not touched."""
+        litellm_mock = MagicMock()
+        litellm_mock._model = "openai/gpt-4o-mini"
+        litellm_mock.client_name.return_value = "openai/gpt-4o-mini"
+        litellm_mock.chat_unified.return_value = {
+            "text": "byo reply", "input_tokens": 5, "output_tokens": 8,
+        }
+        hub = HubRouter(claude_mock, local_mock, settings,
+                        litellm_client=litellm_mock)
+        decision = RoutingDecision(agent_id="x", backend="litellm", score=1.0,
+                                   reasoning="r", used_fallback=False,
+                                   skill_matched="")
+
+        result = hub.invoke(decision, "sys", [{"role": "user", "content": "hi"}])
+
+        assert result.text == "byo reply"
+        assert result.backend == "litellm"
+        assert result.model_name == "openai/gpt-4o-mini"
+        assert result.input_tokens == 5
+        assert result.output_tokens == 8
+        litellm_mock.chat_unified.assert_called_once()
+        claude_mock.chat_unified.assert_not_called()
+        local_mock.chat_unified.assert_not_called()
+
+    def test_invoke_litellm_without_client_fails_closed(
+        self, claude_mock, local_mock, settings,
+    ):
+        """When backend='litellm' but no LiteLLM client is wired, return an
+        errored WorkerResult instead of silently falling through to Claude."""
+        hub = HubRouter(claude_mock, local_mock, settings)  # no litellm_client
+        decision = RoutingDecision(agent_id="x", backend="litellm", score=1.0,
+                                   reasoning="r", used_fallback=False,
+                                   skill_matched="gpt-4o-mini")
+
+        result = hub.invoke(decision, "sys", [{"role": "user", "content": "hi"}])
+
+        assert result.had_error is True
+        assert result.backend == "litellm"
+        assert "no LiteLLM client" in result.text
+        # Critically: neither default client should have been called.
+        claude_mock.chat_unified.assert_not_called()
+        local_mock.chat_unified.assert_not_called()
+
+    def test_invoke_litellm_streaming(
+        self, claude_mock, local_mock, settings,
+    ):
+        """Streaming dispatch hits stream_unified on the LiteLLM client."""
+        litellm_mock = MagicMock()
+        litellm_mock._model = "groq/llama-3.3-70b-versatile"
+        litellm_mock.client_name.return_value = "groq/llama-3.3-70b-versatile"
+        litellm_mock.stream_unified.return_value = {
+            "text": "streamed-byo", "input_tokens": 7, "output_tokens": 11,
+        }
+        hub = HubRouter(claude_mock, local_mock, settings,
+                        litellm_client=litellm_mock)
+        decision = RoutingDecision(agent_id="x", backend="litellm", score=1.0,
+                                   reasoning="r", used_fallback=False,
+                                   skill_matched="")
+        callback = MagicMock()
+
+        result = hub.invoke(decision, "sys", [{"role": "user", "content": "hi"}],
+                            on_token=callback)
+
+        assert result.text == "streamed-byo"
+        assert result.input_tokens == 7
+        assert result.output_tokens == 11
+        litellm_mock.stream_unified.assert_called_once()
+        litellm_mock.chat_unified.assert_not_called()
+
+
+class TestResolveBackend:
+    """Stage-1 (Atelier): the third backend keyword is honoured."""
+
+    def test_explicit_litellm_preference(self):
+        assert HubRouter._resolve_backend("litellm", None) == "litellm"
+
+    def test_litellm_hint_when_pref_auto(self):
+        assert HubRouter._resolve_backend("auto", "litellm") == "litellm"
+
+    def test_existing_claude_preference_unchanged(self):
+        assert HubRouter._resolve_backend("claude", "local") == "claude"
+
+    def test_existing_local_preference_unchanged(self):
+        assert HubRouter._resolve_backend("local", "claude") == "local"
+
+    def test_auto_with_unknown_hint_defaults_to_claude(self):
+        assert HubRouter._resolve_backend("auto", "anything-else") == "claude"
+
+
+class TestTargetFor:
+    """Stage-1 (Atelier): target_for emits a litellm ExecutionTarget."""
+
+    def test_target_for_litellm(self, claude_mock, local_mock, settings):
+        litellm_mock = MagicMock()
+        litellm_mock._model = "gemini/gemini-2.5-flash"
+        hub = HubRouter(claude_mock, local_mock, settings,
+                        litellm_client=litellm_mock)
+        decision = RoutingDecision(agent_id="x", backend="litellm", score=1.0,
+                                   reasoning="r", used_fallback=False,
+                                   skill_matched="")
+        target = hub.target_for(decision, max_tokens=8192)
+        assert target.backend == "litellm"
+        assert target.model_name == "gemini/gemini-2.5-flash"
+        # Unlike local, the per-target max_tokens is NOT clamped to 2048 —
+        # LiteLLM providers carry their own context windows.
+        assert target.max_tokens == 8192
+
 
 # ── Routing latency benchmark (Success criterion 1) ──────────────────────────
 

@@ -97,10 +97,16 @@ class HubRouter:
         local_client,
         settings,
         llm_fallback: Optional[Callable[..., RoutingDecision]] = None,
+        litellm_client=None,
     ):
         self._claude = claude_client
         self._local = local_client
         self._settings = settings
+        # Stage-1 (Atelier plan) BYO-key adapter. Optional — when None, the
+        # router rejects ``decision.backend == "litellm"`` so configurations
+        # that never wired a third client fail closed instead of silently
+        # routing to Claude.
+        self._litellm = litellm_client
         # Phase 3 wires Qwen /no_think here; Phase 1 leaves it None and routing
         # raises if it would be needed without a fallback configured. The
         # current contract is ``fallback(task, *, agent_list=...)`` — older
@@ -387,8 +393,33 @@ class HubRouter:
         # Track the role for downstream logging. The actual router_log write
         # happens in the orchestrator (single source of truth for that table).
         self._last_agent_role = agent_role
-        client = self._claude if decision.backend == "claude" else self._local
-        local_max = max_tokens if decision.backend == "claude" else min(max_tokens, 2048)
+        # Stage-1 (Atelier): the BYO-key LiteLLM adapter is the third backend.
+        # Fail closed when the decision targets ``litellm`` but no client was
+        # wired into the router — otherwise the call would silently fall
+        # through to Claude and bill the user's Anthropic key for a request
+        # they meant to send via Groq/Gemini/etc.
+        if decision.backend == "litellm":
+            if self._litellm is None:
+                return WorkerResult(
+                    text="[Error: routing chose litellm backend but no LiteLLM client is configured.]",
+                    backend="litellm",
+                    model_name=decision.skill_matched or "litellm",
+                    had_error=True,
+                )
+            client = self._litellm
+        elif decision.backend == "claude":
+            client = self._claude
+        else:
+            client = self._local
+        # Per-backend max_tokens caps: claude has no engineering-enforced
+        # cap, local is clamped to 2048 (Qwen3-4B context budget), and
+        # litellm rides on whatever the provider supports — pass through
+        # the caller's request and let LiteLLM/the provider error if it's
+        # over the model's limit.
+        if decision.backend == "claude" or decision.backend == "litellm":
+            local_max = max_tokens
+        else:
+            local_max = min(max_tokens, 2048)
 
         # Phase 3: thinking budget for local Qwen models
         if decision.backend == "local" and int(decision.thinking_budget or 0) > 0:
@@ -489,6 +520,15 @@ class HubRouter:
                 model_name=getattr(self._claude, "_model", "claude"),
                 max_tokens=max_tokens,
             )
+        if decision.backend == "litellm":
+            # The LiteLLM client carries its own model name (``openai/gpt-4o``
+            # etc.). Falls back to a generic label when the client wasn't
+            # wired so the resulting ExecutionTarget still validates.
+            return ExecutionTarget(
+                backend="litellm",
+                model_name=getattr(self._litellm, "_model", "litellm"),
+                max_tokens=max_tokens,
+            )
         return ExecutionTarget(
             backend="local",
             model_name=self._settings.get("default_local_model", "local"),
@@ -508,7 +548,9 @@ class HubRouter:
             return "claude"
         if pref == "local":
             return "local"
-        if hint in ("claude", "local"):
+        if pref == "litellm":
+            return "litellm"
+        if hint in ("claude", "local", "litellm"):
             return hint
         return "claude"
 
