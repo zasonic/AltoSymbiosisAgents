@@ -1,7 +1,116 @@
 # Handoff
 
-**Last commit:** _pending_ — `feat(llm): LiteLLM adapter + Pydantic-validated ReaderOutput`
-**Branch:** `feat/litellm-pydantic-ai` · **Pushed:** no
+**Last commit:** _pending_ — `feat(orch): LangGraph StateGraph engine for ChatOrchestrator.send`
+**Branch:** `feat/langgraph-orchestrator` · **Pushed:** no
+**Date:** 2026-05-17
+
+## What just shipped (this branch)
+
+**Stage 2 / item #7** of the Atelier-blueprint plan — first Stage-2 item.
+Lands a LangGraph 1.2 `StateGraph` rewrite of `ChatOrchestrator.send()`
+behind the `orchestrator_engine` setting (default `"legacy"`). Both
+engines exercise the **same downstream services** — no business logic
+is reimplemented; the graph is control-flow only.
+
+- **`backend/services/orchestrator_graph.py`** (new, ~860 LOC). Builds
+  a `StateGraph(TurnState)` of 19 nodes that mirror the legacy `send()`
+  body 1-for-1:
+    open_turn → team_check → load_agent → load_context → memory_recall
+    → route_decision → resolve_target → security_gate → governance_check
+    → compute_flags → phase8_voting → phase5_escalation_check
+    → phase12_camel → phase6_split → interleaved_reasoning
+    → monolithic_dispatch → alignment_check → escalation_ladder
+    → finalize_turn → END.
+  Each node delegates to existing service instances on the orchestrator
+  (`TurnLifecycle`, `MemoryRecall`, `TurnRouter`, `SecurityGate`,
+  `WorkerDispatch`, `EscalationLadder`, `HubRouter`, `GovernanceEngine`,
+  CaMeL, Reader/Actor split helpers, high-stakes voting). Each guards
+  on `state["result"]` so early-exit nodes (budget exceeded, security
+  abort, governance block, escalation pending, vision unavailable)
+  short-circuit the remainder without re-running services. Compiled
+  graph is cached via `@lru_cache(maxsize=1)` so per-turn overhead is
+  just `.invoke()` on a stateless runnable.
+- **`backend/services/chat_orchestrator.py`**. Three-line dispatch at
+  the top of `send()`: if `orchestrator_engine == "graph"`, route into
+  `run_turn_graph(self, ...)` and return. Legacy body unchanged — that
+  is still the source of truth until two clean weekly bench cycles
+  (AgentDojo + agentic-misalignment) confirm parity.
+- **`backend/core/settings.py`**. New `orchestrator_engine` key
+  (default `"legacy"`, enum `["legacy", "graph"]`) with a manifest
+  entry under the Advanced group.
+- **`backend/requirements.txt`**. Adds `langgraph>=1.2,<2.0.0` to the
+  lite bundle. Resolves to 1.2.0 against Python 3.13 with no native
+  build step. Wheel-only.
+- **Tests.** `backend/tests/test_orchestrator_graph_engine.py` (new,
+  11 tests). Covers: default-engine-is-legacy, dispatch-into-graph
+  invocation, unknown-engine-falls-back-to-legacy, graph happy-path
+  (Claude + local + agent.model_preference override),
+  graph budget-exceeded early-exit, graph persists assistant messages,
+  parametrized legacy↔graph parity on a basic turn, route_decided +
+  memory_recalled events emitted under graph engine.
+
+## Verified
+
+- `cd backend; python -m pytest tests/ -q` — **717 passed, 9 skipped,
+  13 deselected** in 140s (up from 706 baseline; +11 new graph engine
+  tests, all green).
+- Plan-aligned verification (subset): `pytest tests/test_chat_orchestrator.py
+  tests/test_hub_router.py tests/test_reader_actor_split.py
+  tests/test_pipeline.py tests/test_high_stakes_voting.py
+  tests/test_logprob_data_flow.py tests/test_orchestrator_graph_engine.py`
+  → 103 passed, 2 deselected.
+- `python -m pytest tests/test_layer_fences.py -q` — 41 passed.
+- `npm run typecheck` — clean.
+
+## Stage-2 status (post-this-PR)
+
+- **#7 LangGraph 1.2 StateGraph orchestrator** — landed behind flag
+  (this branch). Default flip is gated on two consecutive weekly bench
+  runs (AgentDojo + agentic-misalignment) with no regression — a
+  separate follow-up.
+- **#8 ChatView decomposition + shadcn/ui + TanStack Query** — pending.
+- **#9 Devin-style timeline** — pending (depends on #7 + #8).
+- **#10 Visual TeamComposer** — pending (depends on #8 extractions).
+- **#11 Typed error envelopes** — pending.
+- **#12 Bundled llama-server binary** — pending.
+
+## Next up (per the approved plan)
+
+Two parallelisable directions for the next session:
+
+1. **Stage-2 #7 follow-up — bench-driven default flip.** Run AgentDojo
+   + agentic-misalignment under `orchestrator_engine="graph"` for two
+   weekly cycles; once parity holds, flip the default and delete the
+   legacy body. SSE byte-parity diff between the two engines is the
+   strictest gate.
+2. **Stage-2 #8** — start decomposing `ChatView.tsx` (2,762 LOC) into
+   composed shadcn/ui panels + TanStack Query hooks. The
+   `_deriveThinkingTimeline()` extraction is the smallest first PR.
+
+## Walls hit
+
+None this session. One scope discipline note: the graph engine is
+intentionally a *parallel* implementation, not a refactor of the legacy
+`send()` body. The duplication is temporary — the legacy path is the
+source of truth until bench-confirmed parity flips the default. This
+avoids touching the legacy code-path on this PR, which keeps the
+existing test suite as an unbroken regression guard.
+
+LangGraph nodes return *partial-update dicts* keyed by declared TypedDict
+fields only. Two debug helpers initially used `_prefix` private keys
+that LangGraph silently strips on merge — promoted to `mem_result` and
+`response_empty` as first-class TurnState fields. Worth remembering for
+future node additions: every key a node needs to read in a downstream
+node must be declared in `TurnState`.
+
+---
+
+<!-- Earlier handoff content preserved below for cross-session reference. -->
+
+# Earlier session — `feat/litellm-pydantic-ai` (commit `07c5b55`)
+
+**Last commit:** 07c5b55 — `feat(llm): LiteLLM adapter + Pydantic-validated ReaderOutput`
+**Branch:** `feat/litellm-pydantic-ai` · **Pushed:** yes (merged to main)
 **Date:** 2026-05-17
 
 ## What just shipped (this branch)
