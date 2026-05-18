@@ -62,10 +62,10 @@ const projects = ["tsconfig.web.json", "tsconfig.node.json"];
 
 // Paths excluded from the gate entirely. Generated files emit interfaces
 // the renderer may not import yet — `desktop-ui/api/generated.d.ts` is
-// the Pydantic → TS codegen output (Layer C5). Listing every entry in
-// the allowlist would spam it; the gate that matters for generated files
-// is the "did regenerating it change anything" check in CI, not the
-// dead-export check.
+// the OpenAPI → TS codegen output (Layer C5; openapi-typescript). Listing
+// every entry in the allowlist would spam it; the gate that matters for
+// generated files is the "did regenerating it change anything" check in
+// CI, not the dead-export check.
 const IGNORED_PATHS = new Set([
   "desktop-ui/api/generated.d.ts",
 ]);
