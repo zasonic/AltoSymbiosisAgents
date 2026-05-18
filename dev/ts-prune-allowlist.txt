@@ -58,6 +58,14 @@ desktop-ui/api/client.ts - EscalationRow
 desktop-ui/api/client.ts - Echo
 desktop-ui/api/client.ts - ClassifyResult
 desktop-ui/api/client.ts - VoiceAssetsDownloadResult
+desktop-ui/api/client.ts - ManifestFieldType
+desktop-ui/api/client.ts - ManifestEnumOption
+desktop-ui/api/client.ts - ManifestGroup
+
+# ── components/RosterPicker.tsx: AgentRow used only within the module ──────
+# Exported for symmetry with AgentPanel's internal AgentRow shape; kept
+# available so a future shared types extraction can pick it up by name.
+desktop-ui/components/RosterPicker.tsx - AgentRow
 
 # ── api/sse.ts: internal types referenced within the module only ────────────
 desktop-ui/api/sse.ts - EventHandler

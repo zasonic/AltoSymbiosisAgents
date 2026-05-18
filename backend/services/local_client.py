@@ -95,17 +95,17 @@ class LocalClient(LLMClient):
         # at the persisted port (read from paths.bundled_server_port_file)
         # so that a sidecar restart doesn't lose the connection.
         self._bundled_server: object | None = None
+        # QLPT Stage 1: Ollama logprobs support is gated by server version.
+        # Probe /api/version once per session and cache the result so every
+        # unified-path call doesn't pay the round trip. None = not probed yet.
+        self._ollama_logprobs_ok: bool | None = None
+        self._ollama_logprobs_warned: bool = False
 
     def _inference_timeout(self) -> int:
         try:
             return int(self._settings.get("local_inference_timeout_sec", 120))
         except (TypeError, ValueError):
             return 120
-        # QLPT Stage 1: Ollama logprobs support is gated by server version.
-        # Probe /api/version once per session and cache the result so every
-        # unified-path call doesn't pay the round trip. None = not probed yet.
-        self._ollama_logprobs_ok: bool | None = None
-        self._ollama_logprobs_warned: bool = False
 
     def attach_bundled_server(self, bundled_server: object) -> None:
         """Late-bind the BundledServer handle.
