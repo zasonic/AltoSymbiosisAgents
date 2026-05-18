@@ -79,6 +79,15 @@ export interface ChatSendIn {
   user_message: string;
   agent_id?: string;
 }
+export interface ChatSetAgentIn {
+  conversation_id: string;
+  agent_id?: string;
+}
+export interface ChatSetRosterIn {
+  conversation_id: string;
+  agent_ids?: string[];
+  team_id?: string | null;
+}
 export interface ChatStopIn {
   conversation_id?: string;
 }
@@ -226,6 +235,11 @@ export interface TeamMemberIn {
   team_id: string;
   agent_id: string;
   role?: string;
+}
+export interface TeamSaveAdhocIn {
+  team_id: string;
+  name: string;
+  description?: string;
 }
 export interface TestConnIn {
   backend: string;
