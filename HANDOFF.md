@@ -1,7 +1,66 @@
 # Handoff
 
-**Last commit:** _pending_ — `feat(codegen): switch API type codegen to OpenAPI → openapi-typescript`
-**Branch:** `feat/openapi-typescript-codegen` · **Pushed:** no
+**Last commit:** _pending_ — `test(arch): add backend/core ↔ backend/routes import-fence gate`
+**Branch:** `feat/layer-fences-test` · **Pushed:** no
+**Date:** 2026-05-17
+
+## What just shipped (this branch)
+
+**Stage 1 / item #6** of the Atelier-blueprint plan. New
+`backend/tests/test_layer_fences.py` codifies the layering between
+`backend/core/` (business logic, 2,259 LOC) and `backend/routes/` (HTTP
+serialization, 5,061 LOC). The split was reframed in the plan after
+exploration confirmed it is NOT duplicate trees — they are layered.
+
+Two AST-walked, parametrized fence rules:
+
+1. **`core/` must not import from `routes`.** 19 core files checked
+   (current state: zero violations). Catches `import routes.x`,
+   `from routes import y`, `from routes.x import z`.
+2. **`routes/` must not import `core.api._*` private modules** (or
+   private names like `from core.api import _Foo`). 22 routes files
+   checked (current state: zero violations). The expansion of
+   `from M import N` into `M.N` entries makes the private-name
+   variant detectable even though the module-level part is public.
+
+Tests are intentionally excluded from the fence — fixtures legitimately
+reach into private module-level state (e.g.
+`system_routes._bundled_download_running`).
+
+## Verified
+
+- `cd backend; python -m pytest tests/test_layer_fences.py -v` —
+  41 passed in 0.22s (19 core + 22 routes parametrizations).
+
+## Prior branch (already shipped)
+
+`feat/openapi-typescript-codegen` (commit `75282c5`) — Stage 1 / item #5,
+OpenAPI → TS codegen via `openapi-typescript`. See PR at
+https://github.com/zasonic/AltoSymbiosisAgents/pull/new/feat/openapi-typescript-codegen
+
+## Next up (per the approved plan)
+
+- **Stage 1 item #3** — Pydantic AI + LiteLLM as a third `LLMClient`
+  implementation behind the existing ABC at
+  `backend/services/llm_interface.py:11-33`. New
+  `backend/services/llm_litellm_adapter.py`; one new branch in
+  `hub_router.invoke()`. Pydantic AI also slots into the Phase-6 Reader
+  output parser at `chat_orchestrator.py:1650-1705`.
+- **Stage 1 item #4** — _skipped per user decision_ until SignPath
+  Foundation OSS application is in flight.
+
+## Walls hit
+
+None this session.
+
+---
+
+<!-- Earlier handoff content preserved below for cross-session reference. -->
+
+# Earlier session — `feat/openapi-typescript-codegen` (commit `75282c5`)
+
+**Last commit:** 75282c5 — `feat(codegen): switch API types to OpenAPI + openapi-typescript`
+**Branch:** `feat/openapi-typescript-codegen` · **Pushed:** yes
 **Date:** 2026-05-17
 
 ## What just shipped
