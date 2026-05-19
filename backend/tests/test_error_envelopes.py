@@ -6,20 +6,24 @@ Covers two seams:
     status code + message + hint shape. Each constructor is one classmethod
     on a closed catalog, so a regression here means a renderer switch case
     silently loses its target.
-2.  The FastAPI exception handlers installed in :mod:`server` serialise
-    both :class:`DomainError` raises and plain ``HTTPException`` raises
-    into the same envelope shape. The HTTPException wrapper lets
+2.  The production :func:`install_error_handlers` registers handlers that
+    serialise both :class:`DomainError` raises and plain ``HTTPException``
+    raises into the same envelope shape. The HTTPException wrapper lets
     unmigrated routes keep working without breaking the renderer's
     discriminated-union parser.
+
+The integration tests register the **real** production handlers on a fresh
+FastAPI app (via ``install_error_handlers``), attach throwaway probe routes
+that raise real DomainError / HTTPException values, and hit them through
+the real ASGI request pipeline. No mocks, no copied handler bodies.
 """
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from core.errors import DomainError, http_exception_to_envelope
+from core.errors import DomainError, http_exception_to_envelope, install_error_handlers
 
 
 # ── Unit: DomainError constructors ───────────────────────────────────────────
@@ -137,30 +141,19 @@ def test_http_exception_envelope_stringifies_non_string_detail() -> None:
     assert "missing" in body["message"]
 
 
-# ── Integration: handlers installed on a FastAPI app ─────────────────────────
+# ── Integration: real handlers installed via install_error_handlers ──────────
 
 
-def _make_app() -> FastAPI:
-    """Build a stand-in app with just the two handlers from server.build_app.
+def _app_with_real_handlers() -> FastAPI:
+    """A FastAPI app with the PRODUCTION handlers installed and three throwaway
+    probe routes that raise real DomainError / HTTPException values.
 
-    The handlers are pure functions of the exception, so we don't need the
-    full sidecar wiring — copying the same handler bodies here keeps the
-    test fast and doesn't depend on Settings / API container construction.
+    No mocks. The handlers under test are the same ones :func:`build_app`
+    registers on the production sidecar — :func:`install_error_handlers`
+    is shared, so any drift in the production glue surfaces here.
     """
     app = FastAPI()
-
-    @app.exception_handler(DomainError)
-    async def _domain_error_handler(_request: Request, exc: DomainError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
-
-    @app.exception_handler(HTTPException)
-    async def _http_exception_handler(
-        _request: Request, exc: HTTPException,
-    ) -> JSONResponse:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=http_exception_to_envelope(exc.status_code, exc.detail),
-        )
+    install_error_handlers(app)
 
     @app.get("/probe/domain-error")
     async def _probe_domain() -> dict:
@@ -178,7 +171,7 @@ def _make_app() -> FastAPI:
 
 
 def test_domain_error_handler_emits_typed_envelope() -> None:
-    client = TestClient(_make_app())
+    client = TestClient(_app_with_real_handlers())
     resp = client.get("/probe/domain-error")
     assert resp.status_code == 404
     body = resp.json()
@@ -191,7 +184,7 @@ def test_domain_error_handler_emits_typed_envelope() -> None:
 
 
 def test_http_exception_handler_wraps_into_same_envelope_shape() -> None:
-    client = TestClient(_make_app())
+    client = TestClient(_app_with_real_handlers())
     resp = client.get("/probe/http-error")
     assert resp.status_code == 403
     body = resp.json()
@@ -204,7 +197,7 @@ def test_http_exception_handler_wraps_into_same_envelope_shape() -> None:
 
 
 def test_handlers_do_not_swallow_normal_responses() -> None:
-    client = TestClient(_make_app())
+    client = TestClient(_app_with_real_handlers())
     resp = client.get("/probe/ok")
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}
