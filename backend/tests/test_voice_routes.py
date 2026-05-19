@@ -19,6 +19,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.errors import install_error_handlers
 from core.settings import Settings
 from routes import voice as voice_routes
 from server import BearerAuthMiddleware
@@ -73,6 +74,7 @@ def voice_root(tmp_path, monkeypatch):
 def app(in_memory_db, voice_root, tmp_path):
     a = FastAPI()
     a.add_middleware(BearerAuthMiddleware, expected_token=TOKEN)
+    install_error_handlers(a)
     a.include_router(voice_routes.router, prefix="/api/voice")
 
     settings = Settings(tmp_path / "settings.json")
@@ -167,7 +169,9 @@ class TestTranscribe:
             headers=_auth(),
         )
         assert resp.status_code == 503
-        assert "not downloaded" in resp.json()["detail"]
+        body = resp.json()
+        assert body["error_type"] == "voice_engine_unavailable"
+        assert "not downloaded" in body["message"]
 
 
 # ── /synthesize ──────────────────────────────────────────────────────────────

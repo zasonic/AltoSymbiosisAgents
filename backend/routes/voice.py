@@ -21,12 +21,13 @@ import tempfile
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 import sse_events
 from core import paths
+from core.errors import DomainError
 from services.voice import (
     DEFAULT_STT_MODEL_ID,
     DEFAULT_TTS_VOICE_ID,
@@ -151,14 +152,11 @@ async def transcribe(
     """Receive a wav upload, run whisper-cli, return the transcript text."""
     raw = await file.read()
     if not raw:
-        raise HTTPException(status_code=400, detail="Empty audio upload.")
+        raise DomainError.voice_invalid_input("Empty audio upload.")
     if len(raw) > MAX_AUDIO_BYTES:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Audio too large ({len(raw) // (1024 * 1024)} MB). "
-                f"Maximum {MAX_AUDIO_BYTES // (1024 * 1024)} MB."
-            ),
+        raise DomainError.voice_invalid_input(
+            f"Audio too large ({len(raw) // (1024 * 1024)} MB). "
+            f"Maximum {MAX_AUDIO_BYTES // (1024 * 1024)} MB."
         )
 
     api = get_api(request)
@@ -175,7 +173,7 @@ async def transcribe(
         try:
             text = voice.transcribe(tmp_path, model_id)
         except VoiceServiceError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            raise DomainError.voice_engine_unavailable(str(exc)) from exc
     finally:
         try:
             tmp_path.unlink(missing_ok=True)
@@ -190,14 +188,11 @@ async def synthesize(body: SynthesizeIn, request: Request) -> Response:
     """Synthesize ``text`` into a wav blob via piper. Returns audio/wav."""
     text = (body.text or "").strip()
     if not text:
-        raise HTTPException(status_code=400, detail="text is empty")
+        raise DomainError.voice_invalid_input("text is empty")
     if len(text) > MAX_SYNTHESIZE_CHARS:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Text too long ({len(text)} chars). "
-                f"Maximum {MAX_SYNTHESIZE_CHARS}."
-            ),
+        raise DomainError.voice_invalid_input(
+            f"Text too long ({len(text)} chars). "
+            f"Maximum {MAX_SYNTHESIZE_CHARS}."
         )
 
     api = get_api(request)
@@ -209,7 +204,7 @@ async def synthesize(body: SynthesizeIn, request: Request) -> Response:
     try:
         wav = voice.synthesize(text, voice_id)
     except VoiceServiceError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise DomainError.voice_engine_unavailable(str(exc)) from exc
 
     return Response(content=wav, media_type="audio/wav")
 
@@ -252,7 +247,7 @@ async def assets_download(body: AssetsDownloadIn, request: Request) -> dict:
         voice.resolve_stt(stt_id)
         voice.resolve_tts(tts_id)
     except VoiceServiceError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise DomainError.voice_invalid_input(str(exc)) from exc
 
     with _download_lock:
         if _download_running:

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { Agents, Teams, type TeamRow } from "@/api/client";
+import { Teams, type TeamRow } from "@/api/client";
 import { useAppStore } from "@/stores/appStore";
+import { useAgents, useTeams } from "@/components/chat/queries";
 
 export interface AgentRow {
   id: string;
@@ -37,9 +38,19 @@ export function RosterPicker({ agentId, teamId, onApply, disabled = false }: Pro
   const sidecarReady = useAppStore((s) => s.sidecarStatus?.status === "ready");
   const pushToast = useAppStore((s) => s.pushToast);
 
+  const agentsQuery = useAgents({ enabled: sidecarReady });
+  const teamsQuery = useTeams({ enabled: sidecarReady });
+
+  const agents = useMemo<AgentRow[]>(
+    () => (agentsQuery.data ?? []) as AgentRow[],
+    [agentsQuery.data],
+  );
+  const teams = useMemo<TeamRow[]>(
+    () => (teamsQuery.data ?? []).filter((t) => !t.is_adhoc),
+    [teamsQuery.data],
+  );
+
   const [open, setOpen] = useState(false);
-  const [agents, setAgents] = useState<AgentRow[]>([]);
-  const [teams, setTeams] = useState<TeamRow[]>([]);
   // Local in-popover selection — committed only on Apply so transient
   // multi-clicks don't thrash the backend.
   const [draft, setDraft] = useState<Set<string>>(new Set());
@@ -50,28 +61,6 @@ export function RosterPicker({ agentId, teamId, onApply, disabled = false }: Pro
   const [saveName, setSaveName] = useState("");
 
   const containerRef = useRef<HTMLDivElement | null>(null);
-
-  const reload = async () => {
-    try {
-      const [agentList, teamList] = await Promise.all([
-        Agents.list(),
-        Teams.list(),
-      ]);
-      setAgents((agentList ?? []) as AgentRow[]);
-      setTeams((teamList ?? []).filter((t) => !t.is_adhoc));
-    } catch (err) {
-      pushToast({
-        kind: "error",
-        text: err instanceof Error ? err.message : "Could not load agents",
-      });
-    }
-  };
-
-  useEffect(() => {
-    if (!sidecarReady) return;
-    void reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidecarReady]);
 
   // When the picker opens, seed the draft from the current binding so the
   // user sees what's already applied and can edit it in place.
@@ -163,6 +152,28 @@ export function RosterPicker({ agentId, teamId, onApply, disabled = false }: Pro
       .catch(() => {});
   };
 
+  // Mirror backend coordinator-pick (agent_registry.py:840): first agent with
+  // role == "coordinator", else the first selected agent. When the draft is a
+  // saved-team preset we surface the team's stored coordinator_id verbatim.
+  const coordinatorId = useMemo<string | null>(() => {
+    if (draftTeamId) {
+      const t = teams.find((x) => x.id === draftTeamId);
+      return t?.coordinator_id ?? null;
+    }
+    if (draft.size < 2) return null;
+    const draftAgents = agents.filter((a) => draft.has(a.id));
+    if (draftAgents.length === 0) return null;
+    const explicit = draftAgents.find(
+      (a) => (a.role ?? "").toLowerCase() === "coordinator",
+    );
+    return (explicit ?? draftAgents[0]).id;
+  }, [draft, draftTeamId, agents, teams]);
+
+  const coordinatorName = useMemo(() => {
+    if (!coordinatorId) return null;
+    return agents.find((a) => a.id === coordinatorId)?.name ?? null;
+  }, [coordinatorId, agents]);
+
   const apply = async () => {
     setBusy(true);
     try {
@@ -200,7 +211,7 @@ export function RosterPicker({ agentId, teamId, onApply, disabled = false }: Pro
       pushToast({ kind: "success", text: `Saved "${saveName.trim()}"` });
       setSavingTeam(false);
       setSaveName("");
-      await reload();
+      await teamsQuery.refetch();
     } catch (err) {
       pushToast({
         kind: "error",
@@ -217,7 +228,7 @@ export function RosterPicker({ agentId, teamId, onApply, disabled = false }: Pro
       const t = teams.find((x) => x.id === draftTeamId);
       return t ? `Preset team: ${t.name}` : "Preset team";
     }
-    if (draftSize === 0) return "No agent";
+    if (draftSize === 0) return "Smart routing";
     if (draftSize === 1) {
       const onlyId = Array.from(draft)[0];
       return agents.find((a) => a.id === onlyId)?.name ?? "1 agent";
@@ -253,14 +264,14 @@ export function RosterPicker({ agentId, teamId, onApply, disabled = false }: Pro
 
       {open && (
         <div
-          className="absolute right-0 top-full mt-2 w-[28rem] max-h-[70vh] overflow-y-auto
+          className="absolute right-0 top-full mt-2 w-[32rem] max-h-[78vh] overflow-y-auto
                      glass z-30 p-3"
           role="dialog"
-          aria-label="Pick agents or a team"
+          aria-label="Compose roster"
           data-testid="roster-picker-dropdown"
         >
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <div className="text-xs text-ink-faint">{draftSummary}</div>
+          <header className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-sm font-medium">Compose roster</div>
             {canSaveCurrent && !savingTeam && (
               <button
                 type="button"
@@ -271,7 +282,7 @@ export function RosterPicker({ agentId, teamId, onApply, disabled = false }: Pro
                 Save current as team…
               </button>
             )}
-          </div>
+          </header>
 
           {savingTeam && (
             <div className="rounded-md border border-line bg-bg-2 p-2 mb-2 space-y-2">
@@ -306,73 +317,99 @@ export function RosterPicker({ agentId, teamId, onApply, disabled = false }: Pro
             </div>
           )}
 
-          <input
-            type="text"
-            placeholder="Search agents…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="input mb-2"
-            data-testid="roster-picker-search"
-          />
-
           {teams.length > 0 && (
-            <div className="mt-1 mb-2">
-              <div className="px-1 pb-1 text-[10px] uppercase tracking-wide text-ink-faint">
+            <section className="mb-3" aria-labelledby="roster-saved-teams-label">
+              <div
+                id="roster-saved-teams-label"
+                className="px-1 pb-1 text-[10px] uppercase tracking-wide text-ink-faint"
+              >
                 Saved teams
               </div>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1.5">
                 {teams.map((t) => (
                   <button
                     key={t.id}
                     type="button"
                     onClick={() => pickTeam(t.id)}
-                    className={`px-2 py-1 text-xs rounded-full transition
+                    className={`px-2.5 py-1 text-xs rounded-full transition
                       ${draftTeamId === t.id
-                        ? "bg-accent/20 ring-1 ring-accent"
-                        : "bg-bg-2 hover:bg-bg-3"}`}
+                        ? "bg-accent/20 ring-1 ring-accent text-ink"
+                        : "bg-bg-2 hover:bg-bg-3 text-ink-faint"}`}
                     title={t.description}
                     data-testid={`roster-picker-team-${t.id}`}
+                    aria-pressed={draftTeamId === t.id}
                   >
-                    ◆ {t.name}
+                    <span aria-hidden>◆ </span>
+                    {t.name}
                   </button>
                 ))}
               </div>
-            </div>
+            </section>
           )}
 
-          <div className="px-1 pt-1 pb-1 text-[10px] uppercase tracking-wide text-ink-faint">
-            Agents (click to add)
-          </div>
-          <AgentCard
-            agent={null}
-            selected={draftSize === 0 && !draftTeamId}
-            onClick={() => {
-              setDraft(new Set());
-              setDraftTeamId("");
-            }}
-          />
-          {filtered.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-ink-faint">
-              {agents.length === 0 ? "No agents yet." : "No matches."}
+          <section aria-labelledby="roster-agents-label">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <div
+                id="roster-agents-label"
+                className="px-1 text-[10px] uppercase tracking-wide text-ink-faint"
+              >
+                Agents · click to add or remove
+              </div>
             </div>
-          ) : (
-            filtered.map((a) => (
-              <AgentCard
-                key={a.id}
-                agent={a}
-                selected={draft.has(a.id)}
-                onClick={() => toggleAgent(a.id)}
+
+            <input
+              type="text"
+              placeholder="Search agents…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="input mb-2"
+              data-testid="roster-picker-search"
+            />
+
+            <div
+              role="group"
+              aria-label="Available agents"
+              className="grid grid-cols-1 sm:grid-cols-2 gap-1.5"
+            >
+              <AgentChipCard
+                agent={null}
+                selected={draftSize === 0 && !draftTeamId}
+                isCoordinator={false}
+                onClick={() => {
+                  setDraft(new Set());
+                  setDraftTeamId("");
+                }}
               />
-            ))
-          )}
+              {filtered.length === 0 && agents.length === 0 ? (
+                <div className="col-span-full px-3 py-2 text-xs text-ink-faint">
+                  No agents yet.
+                </div>
+              ) : filtered.length === 0 ? (
+                <div className="col-span-full px-3 py-2 text-xs text-ink-faint">
+                  No matches.
+                </div>
+              ) : (
+                filtered.map((a) => (
+                  <AgentChipCard
+                    key={a.id}
+                    agent={a}
+                    selected={draft.has(a.id)}
+                    isCoordinator={a.id === coordinatorId}
+                    onClick={() => toggleAgent(a.id)}
+                  />
+                ))
+              )}
+            </div>
+          </section>
 
           <footer className="flex items-center justify-between gap-2 mt-3 pt-2 border-t border-line/40">
-            <span className="text-[11px] text-ink-faint">
-              {draftSize === 0
-                ? "Smart routing handles it."
-                : draftSize === 1
-                  ? "Solo agent."
-                  : "Coordinator picked automatically from team roles."}
+            <span
+              className="text-[11px] text-ink-faint"
+              data-testid="roster-picker-summary"
+            >
+              {coordinatorName
+                ? `Coordinator: ${coordinatorName} · ${draftSummary}`
+                : draftSummary}
             </span>
             <div className="flex gap-2">
               <button
@@ -400,16 +437,30 @@ export function RosterPicker({ agentId, teamId, onApply, disabled = false }: Pro
   );
 }
 
-// ── Agent card ───────────────────────────────────────────────────────────────
+// ── Agent chip card ──────────────────────────────────────────────────────────
 
-interface AgentCardProps {
+interface AgentChipCardProps {
   agent: AgentRow | null;
   selected: boolean;
+  isCoordinator: boolean;
   onClick: () => void;
 }
 
-function AgentCard({ agent, selected, onClick }: AgentCardProps) {
+function AgentChipCard({
+  agent,
+  selected,
+  isCoordinator,
+  onClick,
+}: AgentChipCardProps) {
   const name = agent?.name ?? "No agent";
+  const initials = agent
+    ? agent.name
+        .split(/\s+/)
+        .map((w) => w[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase()
+    : "•";
   const desc =
     agent?.description ??
     "Fall back to smart routing with the default system prompt.";
@@ -420,26 +471,33 @@ function AgentCard({ agent, selected, onClick }: AgentCardProps) {
       onClick={onClick}
       role="checkbox"
       aria-checked={selected}
-      className={`w-full text-left px-3 py-2 rounded-md flex items-start gap-2 transition mb-0.5
-                  ${selected ? "bg-accent/15" : "hover:bg-bg-2"}`}
+      className={`text-left p-2 rounded-lg border transition flex items-start gap-2
+                  ${selected
+                    ? "bg-accent/10 border-accent shadow-soft-1"
+                    : "bg-bg-1 border-line hover:bg-bg-2"}`}
       data-testid={agent ? `roster-picker-agent-${agent.id}` : "roster-picker-agent-none"}
     >
       <span
-        className={`mt-1 inline-flex items-center justify-center h-3.5 w-3.5 rounded-sm shrink-0 border ${
-          selected ? "bg-accent border-accent" : "bg-bg-1 border-line"
-        }`}
+        className={`shrink-0 inline-flex items-center justify-center h-7 w-7 rounded-full text-[11px] font-semibold
+                    ${selected
+                      ? "bg-accent text-white"
+                      : "bg-bg-2 text-ink-faint"}`}
         aria-hidden
       >
-        {selected && (
-          <svg width="10" height="10" viewBox="0 0 10 10" stroke="white" strokeWidth="2" fill="none">
-            <polyline points="2 5 4 7 8 3" />
-          </svg>
-        )}
+        {initials}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-1.5 flex-wrap">
           <span className="text-sm font-medium truncate">{name}</span>
-          {agent?.role && (
+          {isCoordinator && (
+            <span
+              className="pill text-[9px] uppercase tracking-wide bg-accent/15 text-accent"
+              data-testid="roster-picker-coordinator-badge"
+            >
+              Coordinator
+            </span>
+          )}
+          {agent?.role && !isCoordinator && (
             <span className="pill text-[10px]">{agent.role}</span>
           )}
         </span>

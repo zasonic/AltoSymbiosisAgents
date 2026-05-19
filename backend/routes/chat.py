@@ -14,7 +14,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import db as _db
-from fastapi import APIRouter, HTTPException, Request, Response
+from core.errors import DomainError
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
 
 from ._helpers import get_api
@@ -198,7 +199,7 @@ def _load_export_data(conversation_id: str) -> tuple[dict, list[dict]]:
         (conversation_id,),
     )
     if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+        raise DomainError.conversation_not_found(conversation_id)
     rows = _db.fetchall(
         "SELECT role, content, model_used, cost_usd, created_at "
         "FROM messages WHERE conversation_id = ? ORDER BY created_at ASC",

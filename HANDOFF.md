@@ -1,14 +1,12 @@
 # Handoff
 
-**Latest on `main`:** `efa4c85` (Merge PR #25 — Stage-2 #9 settings toggle)
-**Open branches (this session):**
-- `feat/visual-team-composer` — Stage-2 #10 (pushed, PR pending; mocked tests removed).
-- `feat/typed-error-envelopes` — Stage-2 #11 (pushed, PR pending; tests rewritten against real handlers).
-- `feat/engine-bootstrap-check` — Stage-2 #12 (this branch, pushed; `bin_manager.test.ts` removed + route tests use real `BundledServer`).
-**Status:** All three remaining Stage-2 items shipped on separate branches. New durable rule
-locked in this session: **no fakes, no mocks, no stand-in objects** — production code real
-end-to-end; tests drive real production code against real dependencies. Mock-based tests
-removed across all three branches.
+**Latest on `main`:** `09bd1a2` (Merge PR #27 — typed error envelopes)
+**This branch:** `feat/engine-bootstrap-check` — Stage-2 #12, pushed, PR pending; CI not yet triggered (open the PR to fire workflows).
+**Already merged this session:** PR #26 (`feat/visual-team-composer`, Stage-2 #10), PR #27 (`feat/typed-error-envelopes`, Stage-2 #11).
+**Status:** Stage 2 complete pending this branch's PR merge. Durable rule locked in this session:
+**no fakes, no mocks, no stand-in objects** — production code real end-to-end; tests drive real
+production code against real dependencies. Mock-based tests removed across all three branches
+before merge.
 **Date:** 2026-05-19
 
 ## Rule reset this session — no fakes, no mocks, no stand-ins
@@ -97,12 +95,12 @@ site is untouched.
   fetches onto the shared `useAgents()` / `useTeams()` hooks from
   `chat/queries.ts` so the TanStack cache is shared with ChatView
   (closes the RosterPicker half of the #8 hook-adoption follow-up).
-- **`desktop-ui/components/RosterPicker.test.tsx`** (new, 18 tests).
-  Pill labelling, sidecar-gated disable, chip-card render +
-  selection + search, coordinator auto-pick (role wins, fallback to
-  registry order, no badge for solo), saved-team chips (render +
-  ad-hoc hiding + member hydration + stored-coordinator badge),
-  apply paths (solo, ad-hoc multi, teamId-routed, unbind-to-empty).
+- **No test file.** A first pass added `desktop-ui/components/RosterPicker.test.tsx`
+  but it mocked `@/api/client` and `useAppStore.setState` — both forbidden under
+  the no-mocks rule that landed mid-session. The file was deleted in the cleanup
+  commit (`377dab5`). Verifying the chip-card flow end-to-end needs Playwright
+  against a real Electron build with a real sidecar; tracked as a Test-infra
+  follow-up below.
 
 ### Stage-2 #11 — Typed error envelopes (`feat/typed-error-envelopes`)
 
@@ -176,23 +174,37 @@ without having to spawn the child and parse a BundledServerError.
   branch falls through to False on both `available` and
   `binary_available` so the renderer never has to special-case the
   service-not-wired state.
-- **Tests.** `desktop-shell/bootstrap/__tests__/bin_manager.test.ts`
-  (new, 5 tests). `backend/tests/test_bundled_server.py` (+3 tests
-  for `binary_available()`). `backend/tests/test_system_routes.py`
-  (+1 test for the missing-binary branch, modified 2).
+- **Tests.** A first pass added `desktop-shell/bootstrap/__tests__/bin_manager.test.ts`
+  but it mocked the `electron` `app` singleton + stubbed `process.resourcesPath`;
+  the file was deleted in the cleanup commit (`7bb5048`) and the defensive
+  `try/except OSError` in `BundledServer.binary_available()` was removed alongside
+  it (rule: a branch reachable only via a fake shouldn't be implemented).
+  Backend coverage stayed real-integration: `backend/tests/test_bundled_server.py`
+  (+2 tests on real BundledServer with real tmp_path binaries),
+  `backend/tests/test_system_routes.py` (+2 in a new `TestBundledStatusBinaryAvailable`
+  class that swaps a real `BundledServer(settings)` into the route container).
 
-## Verified across all three branches
+## Verified across all three branches (post-cleanup)
 
 - **`feat/engine-bootstrap-check` (this branch).**
   - `cd backend && python -m pytest tests/ -q` — **728 passed**, 9
-    skipped, 13 deselected (was 724 on main; +3 binary_available +
-    1 bundled_status).
-  - `npm run test:frontend` — **173 passed** across 19 files (was 168
-    on main; +5 from `bin_manager.test.ts`).
+    skipped, 13 deselected (was 724 on main; +4 real-integration
+    tests covering `binary_available` and `/bundled/status` against
+    real `BundledServer` + real fs Paths).
+  - `npm run test:frontend` — **168 passed** across 18 files (matches
+    main; the mocked `bin_manager.test.ts` was removed in the cleanup
+    commit).
   - `npm run typecheck` + `npm run build` — clean.
-- **`feat/typed-error-envelopes`.** 742 backend, 168 frontend.
-- **`feat/visual-team-composer`.** 720 backend (unchanged from main
-  on that branch), 186 frontend (+18 from `RosterPicker.test.tsx`).
+- **`feat/typed-error-envelopes` (merged via PR #27).** CI green on
+  commit `d625921`: tests + windows-smoke both success. 742 backend,
+  168 frontend. The integration tests in
+  `backend/tests/test_error_envelopes.py` drive the **real**
+  `install_error_handlers` against a fresh FastAPI app — no
+  hand-copied handlers, no MagicMock fixtures.
+- **`feat/visual-team-composer` (merged via PR #26).** CI green on
+  commit `377dab5`. 720 backend (matches branch base), 168 frontend
+  (matches main; the mocked `RosterPicker.test.tsx` was removed in
+  the cleanup commit).
 
 ## Stage-2 status
 
@@ -210,8 +222,8 @@ Stage 2 is complete pending PR merges for the three branches above.
 
 ## Next up
 
-1. **Merge the three open PRs.** Order is not load-bearing — they
-   branched off main concurrently and touch disjoint files.
+1. **Open the PR for `feat/engine-bootstrap-check` and merge it.**
+   Once merged, all of Stage 2 is on main.
 2. **#8 hook-adoption follow-up.** Migrate `AgentPanel.tsx` off its
    own `useState` + `useEffect` fetches onto `useAgents()` /
    `useTeams()` from `chat/queries.ts` (RosterPicker just did it).
@@ -222,7 +234,11 @@ Stage 2 is complete pending PR merges for the three branches above.
    apply path currently catches errors as `Error`. With the new
    `errorType` field on `ApiError`, the rollback-toast text can be
    tailored per discriminator (e.g. "team has no members" → "Pick
-   at least one agent" instead of a generic backend message).
+   at least one agent" instead of a generic backend message). When
+   the first caller actually narrows on it, re-export `ErrorType`
+   and `ErrorEnvelope` from `desktop-ui/api/client.ts` — they are
+   currently module-private (CI ts-prune gate dropped the exports
+   on `d625921` because no caller used them yet).
 5. **#12 follow-up.** Engine-download wizard — when a user opts into
    bundled mode but `binary_available` is False, the renderer should
    surface a one-click download flow that drops the binary at
@@ -241,22 +257,16 @@ extracting `install_error_handlers(app)` from server.py into the
 core errors module so fixtures could call it too. Worth remembering
 for any future cross-cutting middleware additions.
 
-**`PROJECT_ROOT` is module-load-time in `bin_manager.ts`.** It's
-computed from `import.meta.url`, so mocking `app.getAppPath()` in
-tests doesn't actually re-route the dev-mode path. The
-`bin_manager.test.ts` works around this by running all engine-binary
-tests in `app.isPackaged = true` mode with a stubbed
-`process.resourcesPath`, so `getResourceDir()` reads the mock
-instead of the real repo root.
-
-**No jest-dom in this repo.** First pass at
-`RosterPicker.test.tsx` used `toHaveTextContent` / `toHaveAttribute`
-/ `toBeInTheDocument` / `toBeDisabled` and failed with "Invalid Chai
-property". Rewritten with raw DOM assertions
-(`el.textContent.includes(...)`,
-`el.getAttribute("aria-checked") === "true"`,
-`(el as HTMLButtonElement).disabled === true`). Pinned for future
-component tests in this repo.
+**CI ts-prune gate caught unused exports.** PR #27 first push failed
+on the renderer dead-code gate: `ErrorType` and `ErrorEnvelope` were
+exported from `desktop-ui/api/client.ts` but no renderer caller had
+adopted them yet. Fix on `d625921` dropped the `export` keyword so
+both become module-private; the public `ApiError` interface still
+references them, so external callers can read `err.errorType` /
+`err.hint` without an explicit import. When the first caller
+actually `switch`-narrows on the discriminator, re-export then.
+Captured under the no-hypothetical-future-code rule: don't export
+types that have no consumer yet.
 
 ---
 

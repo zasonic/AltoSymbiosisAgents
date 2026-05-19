@@ -23,6 +23,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.errors import install_error_handlers
 from routes import attachments as attachments_routes
 from server import BearerAuthMiddleware
 
@@ -61,6 +62,7 @@ def fake_rag():
 def app(in_memory_db, attachments_root, fake_rag):
     a = FastAPI()
     a.add_middleware(BearerAuthMiddleware, expected_token=TOKEN)
+    install_error_handlers(a)
     a.include_router(attachments_routes.router, prefix="/api")
 
     fake_api = MagicMock()
@@ -191,7 +193,8 @@ class TestUploadUnsupported:
 
         assert resp.status_code == 400
         body = resp.json()
-        assert "pdf" in body.get("detail", "").lower()
+        assert body.get("error_type") == "attachment_invalid"
+        assert "pdf" in body.get("message", "").lower()
 
         rows = in_memory_db.fetchall("SELECT * FROM attachments")
         assert rows == []
@@ -208,7 +211,8 @@ class TestUploadUnsupported:
 
         assert resp.status_code == 400
         body = resp.json()
-        assert "supported" in body.get("detail", "").lower()
+        assert body.get("error_type") == "attachment_invalid"
+        assert "supported" in body.get("message", "").lower()
 
 
 # ── DELETE removes row and file ─────────────────────────────────────────────
