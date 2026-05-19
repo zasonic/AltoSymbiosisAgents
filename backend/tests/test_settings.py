@@ -220,3 +220,38 @@ class TestUpdateMechanism:
         assert s.get("update_mechanism") == "off"
         s.set("update_mechanism", "manual")
         assert s.get("update_mechanism") == "manual"
+
+
+# ── Stage-2 #9: timeline_variant ─────────────────────────────────────────────
+
+class TestTimelineVariant:
+    def test_defaults_to_compact(self, tmp_path):
+        """Existing users see no change until they opt in."""
+        s, _ = make_settings(tmp_path)
+        assert s.get("timeline_variant") == "compact"
+
+    def test_accepts_drillable(self, tmp_path):
+        s, _ = make_settings(tmp_path)
+        s.set("timeline_variant", "drillable")
+        assert s.get("timeline_variant") == "drillable"
+
+    def test_round_trips_through_disk(self, tmp_path):
+        from core.settings import Settings
+        path = tmp_path / "settings.json"
+
+        s1 = Settings(path)
+        s1.set("timeline_variant", "drillable")
+        del s1
+
+        s2 = Settings(path)
+        assert s2.get("timeline_variant") == "drillable"
+
+    def test_manifest_entry_appears_in_appearance_group(self, tmp_path):
+        """The Settings UI should render this under Appearance, not Advanced."""
+        from core.settings import FIELD_METADATA
+        assert "timeline_variant" in FIELD_METADATA
+        entry = FIELD_METADATA["timeline_variant"]
+        assert entry["group"] == "appearance"
+        assert entry["type"] == "enum"
+        option_values = {o["value"] for o in entry["options"]}
+        assert option_values == {"compact", "drillable"}

@@ -1,11 +1,127 @@
 # Handoff
 
-**Latest on `main`:** `bf4afe0` (Merge PR #19 — TanStack Query migration)
-**Branch:** `claude/drillable-timeline-stage-2-UFJgx` · **Pushed:** yes (PR pending)
-**Status:** Stage-2 #9 Devin-style drillable timeline component landed on branch.
+**Latest on `main`:** `3fca374` (Merge PR #24 — DevinTimeline drillable variant)
+**Branch:** `feat/timeline-variant-toggle` · **Pushed:** pending
+**Status:** Stage-2 #9 wired behind a `timeline_variant` setting (Appearance group).
 **Date:** 2026-05-19
 
-## What just shipped (this branch — Stage 2 #9)
+## What just shipped (this branch — Stage 2 #9 wiring)
+
+**Stage-2 item #9 follow-up — settings toggle.** Surfaces the
+`DevinTimeline` drillable variant (landed in PR #24) behind a new
+`timeline_variant` setting in the Appearance group. Default `"compact"`
+preserves the previous render; opt-in `"drillable"` swaps the streaming
+bubble's timeline to the per-row expandable panels.
+
+- **`backend/core/settings.py`.** Adds `"timeline_variant": (str, "compact")`
+  to `SETTINGS_DEFAULTS` and a matching `FIELD_METADATA` entry in the
+  `appearance` group (enum `["compact", "drillable"]`). Sits alongside
+  theme / start_tab / token-count toggles — it's a render preference,
+  not a feature flag, so it doesn't belong in Advanced.
+- **`backend/core/api/settings.py`.** Exposes the value through
+  `SettingsAPI.get_settings()` (the `/api/settings` payload), coerced to
+  `str` with a `"compact"` fallback so a forward-incompatible value
+  can't blank the chat bubble.
+- **`desktop-ui/api/client.ts`.** Adds `timeline_variant?: "compact" |
+  "drillable"` to `SettingsPayload`. Optional so an old sidecar that
+  hasn't migrated yet still typechecks against the renderer.
+- **`desktop-ui/components/chat/Timeline.tsx`** (new, ~20 LOC). Tiny
+  dispatcher that picks between `ThinkingTimeline` (compact) and
+  `DevinTimeline` (drillable) based on a `variant` prop. Falls back
+  to compact on any unknown value. Imported once at the ChatView
+  call site instead of branching inline.
+- **`desktop-ui/components/ChatView.tsx`.** Replaces the
+  `<ThinkingTimeline rows={item.timeline} />` call site with
+  `<Timeline rows={item.timeline} variant={data.timelineVariant} />`.
+  Adds `timelineVariant` state hydrated from `Settings.get()` on both
+  the initial sidecar-ready effect and the window-focus refetch
+  (matches the existing voice_input / voice_output pattern). Threads
+  the variant into `ChatRowData` so the virtualized
+  `ChatListRow` renderer (separate function from the `ChatView`
+  closure) can read it through `data`.
+- **Tests.**
+  - `chat/Timeline.test.tsx` (new, 4 tests): compact variant renders
+    `ThinkingTimeline`, drillable variant renders `DevinTimeline`,
+    rows forward through unchanged across rerenders, empty rows
+    produces an empty ol in both variants.
+  - `tests/test_settings.py` `TestTimelineVariant` (new, 4 tests):
+    default is `"compact"`, accepts `"drillable"`, round-trips
+    through disk, manifest entry exists in the `appearance` group
+    with both enum options.
+
+## Verified
+
+- `npm run typecheck` — clean (both `tsconfig.node.json` and
+  `tsconfig.web.json`).
+- `npm run test:frontend` — **168 passed** across 18 files (was 162
+  before — net +4 from this PR's `Timeline.test.tsx`; the rest of the
+  bump matched the PR #24 baseline that landed simultaneously).
+- `cd backend && python -m pytest tests/ -q` — **724 passed**, 9
+  skipped, 13 deselected (was 720; +4 from `TestTimelineVariant`).
+- `npm run build` — clean (6.3s).
+- `python build-scripts/generate_api_types.py` — no drift on
+  `desktop-ui/api/generated.d.ts` (the `/api/settings` route returns
+  `dict` rather than a Pydantic model, so the OpenAPI schema doesn't
+  enumerate response fields; the typed `SettingsPayload` in
+  `client.ts` is hand-maintained).
+
+## Stage-2 status (post-this-PR)
+
+- **#7 LangGraph 1.2 StateGraph orchestrator** — landed (PR #17).
+  Default still `"legacy"`; flip gated on bench cycles.
+- **#8 ChatView decomposition** — done modulo follow-ups (shadcn/ui
+  swap, wider TanStack adoption on RosterPicker / AgentPanel).
+- **#9 Devin-style timeline** — **DONE end-to-end.** Component +
+  reducer enrichment landed in PR #24; this PR wires it behind a
+  Settings toggle so users can opt in. Real-world feedback now drives
+  whether to flip the default to `"drillable"`.
+- **#10 Visual TeamComposer** — pending.
+- **#11 Typed error envelopes** — pending.
+- **#12 Bundled llama-server binary** — pending.
+
+## Next up
+
+1. **#10 — Visual TeamComposer.** Render-layer rewrite of
+   `RosterPicker.tsx` against the multi-agent UX direction (chip
+   cards, not dropdowns; auto-pick coordinator from role field).
+   Backend hook surface (`useRoster` + `useAgents` + `useTeams`) is
+   already in place — this is a pure-render task.
+2. **#11 — typed error envelopes.** Backend work; converts exception
+   messages into a discriminated-union JSON shape the renderer can
+   pattern-match.
+3. **#12 — bundled llama-server binary.** Sidecar packaging work;
+   ships a llama.cpp binary inside the installer.
+4. **#8 hook-adoption follow-up.** Migrate `RosterPicker.tsx` and
+   `AgentPanel.tsx` off their own `useState` + `useEffect` fetches
+   onto `useAgents()` / `useTeams()` from `chat/queries.ts`.
+5. **#7 follow-up.** Weekly AgentDojo + agentic-misalignment bench
+   cycles under `orchestrator_engine="graph"`; two consecutive clean
+   runs gate the default flip away from `"legacy"`.
+
+## Walls hit
+
+One TypeScript thing worth pinning: `ChatView.tsx` renders the
+streaming bubble inside a *separate* `ChatListRow` function (not the
+`ChatView` closure), so a piece of `ChatView` state can't reach the
+row renderer directly — it has to be threaded through the existing
+`ChatRowData` interface that `useMemo` builds. Same pattern as the
+existing `voiceOutputEnabled` prop. TS2304 caught the
+use-before-declaration the moment I tried to reference
+`timelineVariant` inside the row body; the fix was to add it to
+`ChatRowData`, include it in the `useMemo` deps, and read it as
+`data.timelineVariant`.
+
+The `default_agent_id` field in `SettingsPayload` (in `client.ts`) is
+typed but isn't actually returned by `SettingsAPI.get_settings()` —
+ChatView tolerates it as `undefined` via a `||""` fallback. Worth
+remembering when adding more settings fields: the typed payload is
+aspirational unless the API method explicitly populates the key.
+
+---
+
+<!-- Earlier handoff content preserved below for cross-session reference. -->
+
+# Earlier session — `claude/drillable-timeline-stage-2-UFJgx` (PR #24, merged)
 
 **Stage-2 item #9 — Devin-style drillable timeline.** New sibling
 component to `ThinkingTimeline` that takes the same `ThinkingRow[]`

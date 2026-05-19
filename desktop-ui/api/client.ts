@@ -184,6 +184,12 @@ export interface SettingsPayload {
   // Phase 4: agent pre-selected for new conversations. NULL/empty when the
   // user wants smart routing for every fresh chat.
   default_agent_id?: string | null;
+  // Stage-2 #9: which render of the per-turn ThinkingRow[] timeline the
+  // streaming chat bubble uses ("compact" — original ThinkingTimeline,
+  // "drillable" — DevinTimeline with per-row expand panels). Optional so
+  // older sidecars that haven't been migrated yet just fall back to
+  // "compact".
+  timeline_variant?: "compact" | "drillable";
 }
 
 // ── Settings manifest ─────────────────────────────────────────────────────
