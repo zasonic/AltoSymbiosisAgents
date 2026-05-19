@@ -30,7 +30,8 @@ from pathlib import Path
 
 import db as _db
 from core import paths
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from core.errors import DomainError
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from ._helpers import get_api
@@ -121,8 +122,8 @@ def _extract_text(disk_path: Path) -> str:
     try:
         return disk_path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
-        raise HTTPException(
-            status_code=500, detail=f"Could not read attachment: {exc}",
+        raise DomainError.attachment_save_failed(
+            f"Could not read attachment: {exc}",
         ) from exc
 
 
@@ -144,30 +145,24 @@ async def upload_attachment(
     filename = (file.filename or "upload").strip() or "upload"
     ok, reason = _is_supported(filename)
     if not ok:
-        raise HTTPException(status_code=400, detail=reason)
+        raise DomainError.attachment_invalid(reason)
 
     ext = _ext(filename)
     is_image = _is_image_ext(ext)
 
     raw = await file.read()
     if not raw:
-        raise HTTPException(status_code=400, detail="Empty file.")
+        raise DomainError.attachment_invalid("Empty file.")
     size_cap = MAX_IMAGE_BYTES if is_image else MAX_UPLOAD_BYTES
     if len(raw) > size_cap:
         if is_image:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Image too large ({len(raw) // (1024 * 1024)} MB). "
-                    f"Maximum {MAX_IMAGE_BYTES // (1024 * 1024)} MB."
-                ),
+            raise DomainError.attachment_invalid(
+                f"Image too large ({len(raw) // (1024 * 1024)} MB). "
+                f"Maximum {MAX_IMAGE_BYTES // (1024 * 1024)} MB."
             )
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"File is too large ({len(raw) // 1024} KB). "
-                f"Limit is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
-            ),
+        raise DomainError.attachment_invalid(
+            f"File is too large ({len(raw) // 1024} KB). "
+            f"Limit is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
         )
 
     persist_flag = str(persist).strip().lower() in {"true", "1", "yes", "on"}
@@ -180,8 +175,8 @@ async def upload_attachment(
     try:
         disk_path.write_bytes(raw)
     except OSError as exc:
-        raise HTTPException(
-            status_code=500, detail=f"Could not save attachment: {exc}",
+        raise DomainError.attachment_save_failed(
+            f"Could not save attachment: {exc}",
         ) from exc
 
     if is_image:
@@ -209,9 +204,8 @@ async def upload_attachment(
                 disk_path.unlink(missing_ok=True)
             except OSError:
                 pass
-            raise HTTPException(
-                status_code=503,
-                detail="RAG index is unavailable; cannot persist attachment.",
+            raise DomainError.rag_unavailable(
+                "RAG index is unavailable; cannot persist attachment."
             )
         try:
             rag.add_text(extracted, source=filename)
@@ -222,8 +216,8 @@ async def upload_attachment(
                 disk_path.unlink(missing_ok=True)
             except OSError:
                 pass
-            raise HTTPException(
-                status_code=500, detail=f"RAG ingest failed: {exc}",
+            raise DomainError.attachment_save_failed(
+                f"RAG ingest failed: {exc}",
             ) from exc
 
     now = datetime.now(timezone.utc).isoformat()
@@ -261,7 +255,7 @@ async def get_attachment_blob(attachment_id: str) -> FileResponse:
         (attachment_id,),
     )
     if row is None:
-        raise HTTPException(status_code=404, detail="Attachment not found.")
+        raise DomainError.attachment_not_found()
     name = row["filename"] or ""
     ext = ""
     dot = name.rfind(".")
@@ -269,7 +263,7 @@ async def get_attachment_blob(attachment_id: str) -> FileResponse:
         ext = name[dot:].lower()
     disk_path = paths.attachments_dir() / f"{attachment_id}{ext}"
     if not disk_path.exists():
-        raise HTTPException(status_code=404, detail="Attachment file missing.")
+        raise DomainError.attachment_not_found(missing_file=True)
     media_type = row["mime_type"] or "application/octet-stream"
     return FileResponse(
         path=disk_path, media_type=media_type, filename=name,
@@ -311,7 +305,7 @@ async def delete_attachment(attachment_id: str, request: Request) -> dict:
         (attachment_id,),
     )
     if row is None:
-        raise HTTPException(status_code=404, detail="Attachment not found.")
+        raise DomainError.attachment_not_found()
 
     if row["persist"]:
         rag = getattr(get_api(request), "_rag", None)

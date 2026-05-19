@@ -21,6 +21,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.errors import install_error_handlers
 from routes import chat as chat_routes
 from server import BearerAuthMiddleware
 
@@ -36,6 +37,7 @@ def _auth() -> dict:
 def app(in_memory_db):
     a = FastAPI()
     a.add_middleware(BearerAuthMiddleware, expected_token=TOKEN)
+    install_error_handlers(a)
     a.include_router(chat_routes.router, prefix="/api/chat")
     return a
 

@@ -18,7 +18,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
+
+from core.errors import DomainError
 from pydantic import BaseModel, Field
 
 import db as _db
@@ -85,7 +87,7 @@ def _fetch_or_404(template_id: str) -> sqlite3.Row:
         (template_id,),
     )
     if row is None:
-        raise HTTPException(status_code=404, detail="prompt template not found")
+        raise DomainError.prompt_template_not_found()
     return row
 
 

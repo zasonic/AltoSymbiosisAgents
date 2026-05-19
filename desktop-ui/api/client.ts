@@ -45,9 +45,51 @@ function baseUrl(info: SidecarInfo): string {
   return `http://127.0.0.1:${info.port}`;
 }
 
+/**
+ * Discriminated union of typed errors returned by the FastAPI sidecar
+ * (Stage-2 #11). The renderer can `switch (err.error_type)` to branch
+ * on the typed cases. Routes that still raise raw HTTPException are
+ * normalised by the backend handler to `error_type: "http_error"` so
+ * the response shape is identical regardless of source.
+ */
+export type ErrorType =
+  | "conversation_not_found"
+  | "attachment_not_found"
+  | "attachment_invalid"
+  | "attachment_save_failed"
+  | "prompt_template_not_found"
+  | "invalid_search_query"
+  | "voice_invalid_input"
+  | "voice_engine_unavailable"
+  | "rag_unavailable"
+  | "internal_error"
+  | "http_error";
+
+export interface ErrorEnvelope {
+  error_type: ErrorType;
+  status_code: number;
+  message: string;
+  hint: string | null;
+}
+
 export interface ApiError extends Error {
   status?: number;
   body?: unknown;
+  /** Discriminator from the typed envelope. ``undefined`` for transport
+   *  errors that never reached the sidecar. */
+  errorType?: ErrorType;
+  /** Optional user-facing recovery hint from the typed envelope. */
+  hint?: string | null;
+}
+
+function isEnvelope(value: unknown): value is ErrorEnvelope {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "error_type" in value &&
+    "status_code" in value &&
+    "message" in value
+  );
 }
 
 async function request<T>(
@@ -92,18 +134,41 @@ async function request<T>(
     } catch {
       /* not JSON */
     }
-    const e: ApiError = new Error(
-      typeof parsed === "object" && parsed && "error" in parsed
-        ? String((parsed as { error: unknown }).error)
-        : `Request failed with ${resp.status}`,
-    );
-    e.status = resp.status;
-    e.body = parsed;
-    throw e;
+    throw makeApiError(parsed, resp.status);
   }
 
   if (resp.status === 204) return undefined as unknown as T;
   return (await resp.json()) as T;
+}
+
+/**
+ * Normalise a non-2xx response body into an :type:`ApiError`. Prefers the
+ * typed envelope (Stage-2 #11) when present, falls back to the legacy
+ * ``{detail: "…"}`` and ``{error: "…"}`` shapes for the BearerAuth
+ * middleware's pre-handler short-circuit (which doesn't go through the
+ * exception handlers).
+ */
+function makeApiError(parsed: unknown, status: number): ApiError {
+  if (isEnvelope(parsed)) {
+    const err: ApiError = new Error(parsed.message);
+    err.status = parsed.status_code;
+    err.body = parsed;
+    err.errorType = parsed.error_type;
+    err.hint = parsed.hint;
+    return err;
+  }
+  const message =
+    typeof parsed === "object" && parsed
+      ? "detail" in parsed
+        ? String((parsed as { detail: unknown }).detail)
+        : "error" in parsed
+          ? String((parsed as { error: unknown }).error)
+          : `Request failed with ${status}`
+      : `Request failed with ${status}`;
+  const err: ApiError = new Error(message);
+  err.status = status;
+  err.body = parsed;
+  return err;
 }
 
 export const api = {
@@ -141,14 +206,7 @@ async function postMultipart<T>(path: string, form: FormData): Promise<T> {
     } catch {
       /* not JSON */
     }
-    const detail =
-      typeof parsed === "object" && parsed && "detail" in parsed
-        ? String((parsed as { detail: unknown }).detail)
-        : `Request failed with ${resp.status}`;
-    const e: ApiError = new Error(detail);
-    e.status = resp.status;
-    e.body = parsed;
-    throw e;
+    throw makeApiError(parsed, resp.status);
   }
   return (await resp.json()) as T;
 }

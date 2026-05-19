@@ -25,6 +25,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.errors import install_error_handlers
 from routes import attachments as attachments_routes
 from server import BearerAuthMiddleware
 
@@ -59,6 +60,7 @@ def fake_rag():
 def app(in_memory_db, attachments_root, fake_rag):
     a = FastAPI()
     a.add_middleware(BearerAuthMiddleware, expected_token=TOKEN)
+    install_error_handlers(a)
     a.include_router(attachments_routes.router, prefix="/api")
 
     fake_api = MagicMock()
@@ -258,8 +260,10 @@ class TestImageSizeCap:
             files=files, data={"persist": "false"}, headers=_auth(),
         )
         assert resp.status_code == 400, resp.text
-        assert "20 MB" in resp.json().get("detail", "") or \
-               "too large" in resp.json().get("detail", "").lower()
+        body = resp.json()
+        assert body.get("error_type") == "attachment_invalid"
+        assert "20 MB" in body.get("message", "") or \
+               "too large" in body.get("message", "").lower()
 
         # No attachment row should have been written.
         rows = in_memory_db.fetchall("SELECT * FROM attachments")

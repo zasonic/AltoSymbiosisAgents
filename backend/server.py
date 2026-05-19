@@ -44,6 +44,7 @@ if str(_HERE) not in sys.path:
 
 import sse_events  # noqa: E402
 from core import paths  # noqa: E402
+from core.errors import install_error_handlers  # noqa: E402
 from core.events import EventBus  # noqa: E402
 from core.settings import Settings  # noqa: E402
 from core.api import API  # noqa: E402
@@ -259,6 +260,12 @@ def build_app(token: str, user_data: Path | None) -> tuple[FastAPI, _AppContaine
     # request.app.state.container.
     app.state.container = container
     app.state.shutdown_event = asyncio.Event()
+
+    # Typed error envelopes (Stage-2 #11). Routes raise DomainError instead
+    # of HTTPException(...) so the renderer can pattern-match on
+    # ``error_type`` instead of parsing strings. The HTTPException branch
+    # of the handler wraps unmigrated raises into the same envelope shape.
+    install_error_handlers(app)
 
     # Register routers (single source of truth: ROUTER_SPECS above).
     register_routers(app)
