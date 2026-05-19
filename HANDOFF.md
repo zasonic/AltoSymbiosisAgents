@@ -1,7 +1,111 @@
 # Handoff
 
-**Last commit:** _pending_ — `fix(api): forward team_id through chat roster facade`
-**Branch:** `fix/roster-team-id-passthrough` · **Pushed:** no
+**Last commit:** _pending_ — `chore(ui): extract deriveThinkingTimeline from ChatView.tsx`
+**Branch:** `chore/extract-derive-thinking-timeline` · **Pushed:** no
+**Date:** 2026-05-18
+
+## What just shipped (this branch)
+
+**Stage 2 / item #8 — first PR** of the Atelier-blueprint ChatView
+decomposition. Pulls the 300-line `_deriveThinkingTimeline` reducer
+(and its 15 event-shape interfaces + the `_truncate` helper) out of
+`ChatView.tsx` (2,762 LOC) into its own pure-function module so it can
+be unit-tested in isolation and reused by future panels (Devin-style
+timeline, agent-attribution chips) without dragging the whole chat
+component in.
+
+- **`desktop-ui/components/chat/deriveThinkingTimeline.ts`** (new,
+  ~430 LOC). Verbatim move of the reducer; the only renames are
+  `_deriveThinkingTimeline → deriveThinkingTimeline` and
+  `_truncate → truncate` (module-local). Exports
+  `deriveThinkingTimeline(events) → ThinkingRow[]` plus the
+  `ThinkingRow`, `ThinkingRowState`, and `StreamingEvent` types. The
+  long section comment that documents intentional drops (which events
+  the reducer ignores and why) moved with it.
+- **`desktop-ui/components/ChatView.tsx`.** Imports the function and
+  types from the new module; the inline block (lines 171–607 in the
+  old file, ~437 LOC) is gone. Two call-site references and one
+  comment updated to the new name. File shrinks from 2,762 → ~2,325
+  LOC.
+- **`desktop-ui/components/chat/deriveThinkingTimeline.test.ts`**
+  (new, 15 tests). Pins the behavioral contract the function had been
+  carrying implicitly: empty-events → no rows; intentional drops
+  (`pipeline_*`, `checkpoint_state=provisional|committed`); dedupe of
+  `route_decided` / `memory_recalled` / `security_assessment` (last
+  wins, replaced in place); ordering preserved across distinct types;
+  state mapping for `security_scan.verdict`, `challenger_complete`
+  (parse_failed / signal / clear), `camel_complete` (error / blocked /
+  ok), `reader_complete.red_flags`; truncation of long `reasoning`
+  (80 chars) and `reason` (140 chars) fields; per-row keys are unique.
+
+## Verified
+
+- `npx vitest run desktop-ui/components/chat/deriveThinkingTimeline.test.ts`
+  → **15 passed** in 4 ms.
+- `npm run typecheck` — clean (both tsconfig.node.json and
+  tsconfig.web.json).
+- `npm run test:frontend` — **109 passed** across 12 files (up from
+  94 baseline in earlier handoff — already had a few more before this
+  branch; +15 are this PR's, the rest were pre-existing).
+
+## Stage-2 status (post-this-PR)
+
+- **#7 LangGraph 1.2 StateGraph orchestrator** — landed (merged in
+  PR #17). Default flip is gated on two consecutive weekly bench
+  cycles (AgentDojo + agentic-misalignment) — a separate follow-up.
+- **#8 ChatView decomposition** — **in progress**. This PR is the
+  first extraction. Next extractions in priority order:
+    1. The live-pipeline reducer at `_derivePipelineLive` (sibling of
+       the one we just moved, ~140 LOC).
+    2. `ThinkingTimeline` + `_thinkingRowTone` rendering components
+       (~80 LOC) — now a natural follow because the data layer is
+       split out.
+    3. `applyRoster` + roster state into a `useRoster()` hook.
+    4. TanStack Query migration of `Chat.list` / `Agents.list` /
+       `Teams.list` from `useEffect` + `useState`.
+- **#9 Devin-style timeline** — pending (depends on #7 + #8). Once
+  the renderer in (2) above is its own component, the Devin-style
+  drillable variant becomes a sibling, not a refactor.
+- **#10 Visual TeamComposer** — pending (depends on #8 extractions).
+- **#11 Typed error envelopes** — pending.
+- **#12 Bundled llama-server binary** — pending.
+
+## Next up
+
+Three parallelisable directions for the next session:
+
+1. **Continue Stage-2 #8.** The next-smallest extraction is
+   `_derivePipelineLive` (same shape as the function this PR moved —
+   pure reducer over the streaming event log). Once it's out, the
+   `ThinkingTimeline` / `_thinkingRowTone` rendering pair becomes a
+   trivial follow-on extraction.
+2. **Stage-2 #7 follow-up** — kick off the first weekly bench cycle
+   under `orchestrator_engine="graph"`.
+
+## Walls hit
+
+None. One scope discipline note: the extracted module is a pure
+function over a single event-log array. No React state, no React
+hooks, no module-level mutable state — same shape as the prior
+`_derivePipelineLive` sibling, so the next extraction will mirror
+this PR almost line-for-line.
+
+The first attempt at the Edit used too-clever placeholder anchors and
+left orphaned references in the file; reverted via
+`git checkout -- desktop-ui/components/ChatView.tsx` and redid the
+extraction with a single targeted Edit covering the contiguous block.
+Lesson for future large-block moves: read the *entire* range in one
+`Read` call first, then submit one Edit with the exact captured
+content as `old_string` — don't chunk with placeholders.
+
+---
+
+<!-- Earlier handoff content preserved below for cross-session reference. -->
+
+# Earlier session — `fix/roster-team-id-passthrough` (commit `8c397e8`, merged to main in #18)
+
+**Last commit:** 8c397e8 — `fix(api): forward team_id through chat roster facade`
+**Branch:** `fix/roster-team-id-passthrough` · **Pushed:** yes (merged to main)
 **Date:** 2026-05-18
 
 ## What just shipped (this branch)
@@ -44,15 +148,6 @@ conversation row.
   `pytest tests/test_chat_orchestrator.py tests/test_pipeline.py
   tests/test_layer_fences.py tests/test_api_chat_roster_facade.py -q`
   → 92 passed.
-
-## Next up
-
-- Manual smoke-test of RosterPicker in the desktop UI: solo agent
-  pick, multi-agent ad-hoc, saved-team preset — all three should now
-  bind the conversation (chip reflects the pick, no error toast).
-- Resume the previously-planned work (Stage 2 #7 follow-up — the
-  AgentDojo + agentic-misalignment bench-driven default flip of
-  `orchestrator_engine="graph"`, or Stage 2 #8 ChatView decomposition).
 
 ## Walls hit
 
