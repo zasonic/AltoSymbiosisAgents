@@ -35,6 +35,11 @@ export interface ThinkingRow {
   icon:    string;
   label:   string;
   detail?: string;
+  // Full, un-truncated narrative the compact `detail` was summarising. Only
+  // the drillable variant of the timeline (DevinTimeline) reads this field;
+  // ThinkingTimeline ignores it. Empty unless the event carried longer
+  // free-form text than fits in the collapsed row.
+  expandedDetail?: string;
 }
 
 interface CheckpointStateEvent {
@@ -166,6 +171,9 @@ export function deriveThinkingTimeline(events: StreamingEvent[]): ThinkingRow[] 
         icon:  "🎯",
         label: `Routed to ${r.model || "model"}`,
         detail: detailParts.join(" · ") || undefined,
+        expandedDetail: r.reasoning && r.reasoning.length > 80
+          ? r.reasoning
+          : undefined,
       };
       if (routeRowIdx >= 0) {
         rows[routeRowIdx] = row;
@@ -250,6 +258,7 @@ export function deriveThinkingTimeline(events: StreamingEvent[]): ThinkingRow[] 
         icon:  "↺",
         label: `Step ${r.step ?? "?"} rolled back${r.agent ? ` · ${r.agent}` : ""}`,
         detail: r.reason ? truncate(r.reason, 140) : undefined,
+        expandedDetail: r.reason && r.reason.length > 140 ? r.reason : undefined,
       });
       continue;
     }
@@ -262,6 +271,7 @@ export function deriveThinkingTimeline(events: StreamingEvent[]): ThinkingRow[] 
         icon:  "🔁",
         label: `Step ${r.step ?? "?"} retry${r.attempt ? ` (attempt ${r.attempt})` : ""}${r.agent ? ` · ${r.agent}` : ""}`,
         detail: r.reason ? truncate(r.reason, 140) : undefined,
+        expandedDetail: r.reason && r.reason.length > 140 ? r.reason : undefined,
       });
       continue;
     }
@@ -340,6 +350,7 @@ export function deriveThinkingTimeline(events: StreamingEvent[]): ThinkingRow[] 
         icon:  "⛔",
         label: `Governance blocked${r.policy ? ` · ${r.policy}` : ""}`,
         detail: r.reason ? truncate(r.reason, 140) : undefined,
+        expandedDetail: r.reason && r.reason.length > 140 ? r.reason : undefined,
       });
       continue;
     }
@@ -378,6 +389,9 @@ export function deriveThinkingTimeline(events: StreamingEvent[]): ThinkingRow[] 
         icon:  "🐫",
         label: errored ? "CaMeL fell back" : "CaMeL plan executed",
         detail: errored ? truncate(r.error || "", 140) : (parts.join(" · ") || undefined),
+        expandedDetail: errored && r.error && r.error.length > 140
+          ? r.error
+          : undefined,
       });
       continue;
     }
@@ -389,12 +403,20 @@ export function deriveThinkingTimeline(events: StreamingEvent[]): ThinkingRow[] 
       const detailParts: string[] = [];
       if (tools.length > 0) detailParts.push(`tools: ${tools.slice(0, 3).join(", ")}${tools.length > 3 ? "…" : ""}`);
       if (flags.length > 0) detailParts.push(`${flags.length} red flag${flags.length === 1 ? "" : "s"}`);
+      // Compose the un-truncated narrative for the drill-down: full intent +
+      // full tools list + full red-flags list. Only emit when at least one
+      // field carries more than the collapsed `detail` could fit.
+      const expandedParts: string[] = [];
+      if (r.intent && r.intent.length > 0) expandedParts.push(`Intent: ${r.intent}`);
+      if (tools.length > 3) expandedParts.push(`Proposed tools: ${tools.join(", ")}`);
+      if (flags.length > 0) expandedParts.push(`Red flags: ${flags.join(", ")}`);
       rows.push({
         key,
         state: flags.length > 0 ? "warn" : "info",
         icon:  "📖",
         label: "Reader analysed request",
         detail: detailParts.join(" · ") || (r.intent ? truncate(r.intent, 100) : undefined),
+        expandedDetail: expandedParts.length > 0 ? expandedParts.join("\n") : undefined,
       });
       continue;
     }
@@ -419,6 +441,9 @@ export function deriveThinkingTimeline(events: StreamingEvent[]): ThinkingRow[] 
         icon:  "💭",
         label: r.label || "Reasoning complete",
         detail: r.detail || (r.thinking_preview ? truncate(r.thinking_preview, 140) : undefined),
+        expandedDetail: r.thinking_preview && r.thinking_preview.length > 140
+          ? r.thinking_preview
+          : undefined,
       });
       continue;
     }
@@ -431,6 +456,7 @@ export function deriveThinkingTimeline(events: StreamingEvent[]): ThinkingRow[] 
         icon:  "⚠",
         label: "Response may not address your request",
         detail: r.reason ? truncate(r.reason, 140) : undefined,
+        expandedDetail: r.reason && r.reason.length > 140 ? r.reason : undefined,
       });
       continue;
     }
