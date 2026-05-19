@@ -24,6 +24,9 @@
 // maps to the same accent/warn/err palette PipelineAttribution and the rest
 // of the chat surface already use.
 
+import type { StreamingEvent } from "./events";
+export type { StreamingEvent };
+
 export type ThinkingRowState = "info" | "ok" | "warn" | "error";
 
 export interface ThinkingRow {
@@ -32,12 +35,6 @@ export interface ThinkingRow {
   icon:    string;
   label:   string;
   detail?: string;
-}
-
-export interface StreamingEvent {
-  type: string;
-  data: unknown;
-  at:   number;
 }
 
 interface CheckpointStateEvent {

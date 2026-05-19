@@ -67,6 +67,15 @@ desktop-ui/api/client.ts - ManifestGroup
 # available so a future shared types extraction can pick it up by name.
 desktop-ui/components/RosterPicker.tsx - AgentRow
 
+# ── components/chat/useRoster.ts: hook arg/result contract types ───────────
+# Exported as the documented hook surface so consumers can spell out the
+# call shape; ts-prune flags them as "used in module" because at the
+# moment only the hook itself references them. Kept exported so a future
+# wrapper component (visual TeamComposer) or storybook entry can pull
+# them in by name without duplicating the shape.
+desktop-ui/components/chat/useRoster.ts - UseRosterArgs
+desktop-ui/components/chat/useRoster.ts - UseRosterResult
+
 # ── api/sse.ts: internal types referenced within the module only ────────────
 desktop-ui/api/sse.ts - EventHandler
 desktop-ui/api/sse.ts - EventSubscription
