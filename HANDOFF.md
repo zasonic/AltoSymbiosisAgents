@@ -1,10 +1,137 @@
 # Handoff
 
 **Latest on `main`:** `bf4afe0` (Merge PR #19 — TanStack Query migration)
-**Status:** Stage-2 #8 ChatView decomposition is structurally complete.
-**Date:** 2026-05-18
+**Branch:** `claude/drillable-timeline-stage-2-UFJgx` · **Pushed:** yes (PR pending)
+**Status:** Stage-2 #9 Devin-style drillable timeline component landed on branch.
+**Date:** 2026-05-19
 
-## What just shipped (Stage 2 #8, across four merged PRs)
+## What just shipped (this branch — Stage 2 #9)
+
+**Stage-2 item #9 — Devin-style drillable timeline.** New sibling
+component to `ThinkingTimeline` that takes the same `ThinkingRow[]`
+shape and renders each row as a clickable button with an expandable
+detail panel underneath. `ThinkingTimeline` is untouched; the two
+components coexist behind a future settings toggle (deferred to a
+follow-up — this PR ships the component + the reducer enrichment only).
+
+- **`desktop-ui/components/chat/deriveThinkingTimeline.ts`.** Adds one
+  optional field `expandedDetail?: string` to the `ThinkingRow`
+  interface (additive, non-breaking — `ThinkingTimeline` ignores it).
+  Eight event branches now populate it with the un-truncated narrative
+  the compact `detail` was summarising: `route_decided` (full
+  `reasoning`), `checkpoint_state` rolled_back / `pipeline_step_retry`
+  / `governance_blocked` / `alignment_warning` (full `reason`),
+  `camel_complete` when errored (full `error`), `reasoning_complete`
+  (full `thinking_preview`), and `reader_complete` (a multi-line
+  composition of full `intent` + full `proposed_tools` list + full
+  `red_flags` list). Every branch guards on `length > 140` (or 80 for
+  `route_decided`, or "exceeds the collapsed summary" for
+  `reader_complete`) so we don't emit `expandedDetail` when the
+  collapsed `detail` already fits the whole text.
+- **`desktop-ui/components/chat/DevinTimeline.tsx`** (new, ~80 LOC).
+  Sibling render of `ThinkingTimeline.tsx`. Same outer ol shape
+  (`data-testid="chat-stream-timeline-drillable"`, `aria-live="polite"`,
+  `aria-atomic="false"`); same `rowTone(state)` palette mapping; same
+  `role="status"` on each row. Each row is a `<button>` with
+  `aria-expanded` and `aria-controls` (pointing at the panel `id`
+  when a panel will render). Local `useState<Set<string>>` tracks
+  per-row open state keyed by `row.key`. Collapsed: icon + label +
+  `line-clamp-2`-truncated detail (same as `ThinkingTimeline`).
+  Expanded: panel rendered below the button with the full
+  `expandedDetail ?? detail` text, `whitespace-pre-wrap` so
+  multi-line `reader_complete` and `reasoning_complete` panels render
+  legibly. Chevron `▸` rotates 90° via Tailwind `transition-transform`
+  when open. Keyboard-accessible via the native button (Enter / Space
+  toggle). Rows that carry neither `detail` nor `expandedDetail`
+  omit `aria-controls` and render no panel.
+- **Tests.**
+  - `chat/DevinTimeline.test.tsx` (new, 10 tests): aria-live polite ol
+    + role=status rows, button starts collapsed (aria-expanded=false),
+    click expands and shows `expandedDetail`, falls back to `detail`
+    when `expandedDetail` is absent, second click collapses,
+    independent per-row expansion, no `aria-controls` for bare rows,
+    state-specific palette classes, empty input renders empty list,
+    `aria-controls` ↔ panel `id` linkage.
+  - `chat/deriveThinkingTimeline.test.ts` (+7 tests, 15 → 22): pins
+    `expandedDetail` is populated on long `route_decided` reasoning
+    and left undefined for short ones; pins `expandedDetail` on long
+    rollback / retry / governance / alignment reasons; pins the
+    `camel_complete` errored-only branch; pins the multi-line
+    `reader_complete` packing of intent + tools + red_flags; pins
+    `reader_complete` leaves `expandedDetail` unset when the
+    collapsed summary already covered everything; pins
+    `reasoning_complete` `thinking_preview` passthrough.
+
+## Verified
+
+- `npx vitest run desktop-ui/components/chat/` — **68 passed** across
+  6 files (was 41 at the end of Stage-2 #8; +27 from this PR:
+  +10 DevinTimeline, +7 deriveThinkingTimeline, +10 carried over from
+  queries/useRoster that ran in the same suite folder).
+- `npm run test:frontend` — **162 passed** across 17 files (up from
+  145 baseline; +17 from this PR's two test files).
+- `npm run typecheck` — clean (both `tsconfig.node.json` and
+  `tsconfig.web.json`).
+- `npm run build` — clean.
+
+## Stage-2 status (post-this-PR)
+
+- **#7 LangGraph 1.2 StateGraph orchestrator** — landed (PR #17).
+  Default still `"legacy"`; flip gated on bench cycles.
+- **#8 ChatView decomposition** — done modulo follow-ups (shadcn/ui
+  swap, wider TanStack adoption on RosterPicker / AgentPanel).
+- **#9 Devin-style timeline** — **component + reducer enrichment
+  landed** (this PR). Two follow-ups outstanding before users see it:
+    1. A settings key (e.g. `timeline_variant: "compact" | "drillable"`,
+       default `"compact"`) and a Settings toggle.
+    2. ChatView wiring: read the setting and render either
+       `<ThinkingTimeline rows={item.timeline} />` or
+       `<DevinTimeline rows={item.timeline} />` at
+       `ChatView.tsx:1805`. The two components have identical props,
+       so it's a 1-line ternary plus the new import.
+- **#10 Visual TeamComposer** — pending.
+- **#11 Typed error envelopes** — pending.
+- **#12 Bundled llama-server binary** — pending.
+
+## Next up
+
+1. **Wire #9 behind a settings toggle.** The smallest possible
+   follow-up: new `timeline_variant` setting, a Settings checkbox
+   ("Use drillable timeline (experimental)"), and the 1-line ChatView
+   swap. Once that ships, real-world feedback can drive whether to
+   flip the default.
+2. **#10 — Visual TeamComposer.** Render-layer rewrite of
+   `RosterPicker.tsx`. Backend hook surface (`useRoster` +
+   `useAgents` + `useTeams`) is already in place.
+3. **#11 — typed error envelopes.** Backend work.
+4. **#12 — bundled llama-server binary.** Sidecar packaging.
+5. **#8 hook-adoption follow-up.** Migrate `RosterPicker.tsx` and
+   `AgentPanel.tsx` off their own `useState` + `useEffect` fetches
+   onto `useAgents()` / `useTeams()` from `chat/queries.ts`.
+
+## Walls hit
+
+None this session. The interface change to `ThinkingRow` was
+intentionally additive (`expandedDetail` is optional), which kept the
+existing `ThinkingTimeline` tests green without modification — the
+old component just ignores the new field. Same trick should work for
+future row-shape extensions like timestamps or sub-rows if the
+"sub-step traces" half of the Devin vision lands later.
+
+The drill-down only delivers value when the panel shows *more* than
+the collapsed line. So the reducer enrichment is doing the real work
+here — it preserves every existing `truncate()` call (so collapsed
+rows look exactly as before) and adds the full string as a parallel
+field only when the truncation would clip. `DevinTimeline` falls back
+to the collapsed `detail` for rows where the originating event didn't
+carry longer text, so the expand still toggles meaningfully on every
+row but stays a one-liner when there's nothing more to show.
+
+---
+
+<!-- Earlier handoff content preserved below for cross-session reference. -->
+
+# Earlier session — Stage 2 #8 ChatView decomposition (merged via PRs #19–22)
 
 `ChatView.tsx` went from **2,762 → 2,146 LOC** (−616, ~22%), with four
 focused sibling modules under `desktop-ui/components/chat/` and 36 new

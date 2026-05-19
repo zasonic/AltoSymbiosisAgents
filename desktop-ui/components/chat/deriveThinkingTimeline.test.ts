@@ -171,4 +171,81 @@ describe("deriveThinkingTimeline", () => {
       expect(new Set(keys).size).toBe(rows.length);
     });
   });
+
+  describe("expandedDetail for the drillable variant", () => {
+    it("populates the un-truncated reasoning on route_decided when it would clip", () => {
+      const long = "a".repeat(200);
+      const rows = deriveThinkingTimeline([
+        evt("route_decided", { model: "claude", reasoning: long }),
+      ]);
+      expect(rows[0].detail!.endsWith("…")).toBe(true);
+      expect(rows[0].expandedDetail).toBe(long);
+    });
+
+    it("leaves expandedDetail unset when the reasoning fits in the collapsed line", () => {
+      const rows = deriveThinkingTimeline([
+        evt("route_decided", { model: "claude", reasoning: "short" }),
+      ]);
+      expect(rows[0].expandedDetail).toBeUndefined();
+    });
+
+    it("populates expandedDetail for long rollback / retry / governance / alignment reasons", () => {
+      const long = "x".repeat(300);
+      const rows = deriveThinkingTimeline([
+        evt("checkpoint_state", { state: "rolled_back", step: 1, reason: long }),
+        evt("pipeline_step_retry", { step: 2, attempt: 1, reason: long }),
+        evt("governance_blocked", { policy: "p", reason: long }),
+        evt("alignment_warning", { reason: long }),
+      ]);
+      for (const r of rows) {
+        expect(r.expandedDetail).toBe(long);
+        expect(r.detail!.length).toBeLessThanOrEqual(140);
+      }
+    });
+
+    it("populates expandedDetail for camel_complete only when it errored with a long message", () => {
+      const longErr = "boom-".repeat(40);
+      const errored = deriveThinkingTimeline([
+        evt("camel_complete", { error: longErr }),
+      ]);
+      const succeeded = deriveThinkingTimeline([
+        evt("camel_complete", { executed_steps: 2 }),
+      ]);
+      expect(errored[0].expandedDetail).toBe(longErr);
+      expect(succeeded[0].expandedDetail).toBeUndefined();
+    });
+
+    it("packs the full intent / tools / red-flags into reader_complete expandedDetail", () => {
+      const intent = "Long intent narrative ".repeat(8);
+      const tools  = ["t1", "t2", "t3", "t4", "t5"];
+      const flags  = ["jailbreak", "data-exfil"];
+      const rows = deriveThinkingTimeline([
+        evt("reader_complete", { intent, proposed_tools: tools, red_flags: flags }),
+      ]);
+      const ex = rows[0].expandedDetail!;
+      expect(ex).toContain("Intent: ");
+      expect(ex).toContain(intent.trim());
+      expect(ex).toContain("Proposed tools: t1, t2, t3, t4, t5");
+      expect(ex).toContain("Red flags: jailbreak, data-exfil");
+    });
+
+    it("leaves reader_complete expandedDetail unset when nothing exceeds the collapsed summary", () => {
+      const rows = deriveThinkingTimeline([
+        evt("reader_complete", {
+          intent: "",
+          proposed_tools: ["a", "b"],
+          red_flags: [],
+        }),
+      ]);
+      expect(rows[0].expandedDetail).toBeUndefined();
+    });
+
+    it("populates the un-truncated thinking_preview on reasoning_complete", () => {
+      const preview = "Thinking trace ".repeat(20);
+      const rows = deriveThinkingTimeline([
+        evt("reasoning_complete", { thinking_preview: preview }),
+      ]);
+      expect(rows[0].expandedDetail).toBe(preview);
+    });
+  });
 });
