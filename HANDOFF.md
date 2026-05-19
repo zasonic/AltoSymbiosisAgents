@@ -1,7 +1,149 @@
 # Handoff
 
-**Last commit:** _pending_ — `chore(ui): extract derivePipelineLive, ThinkingTimeline, useRoster from ChatView`
-**Branch:** `chore/chatview-decomposition-part-2` · **Pushed:** no · **Stacked on:** `chore/extract-derive-thinking-timeline`
+**Last commit:** _pending_ — `chore(ui): migrate ChatView list fetches to TanStack Query`
+**Branch:** `chore/chatview-tanstack-query` · **Pushed:** no · **Stacked on:** `chore/chatview-decomposition-part-2`
+**Date:** 2026-05-18
+
+## What just shipped (this branch)
+
+**Stage 2 / item #8 — third PR** (and the finisher for the
+decomposition-proper portion of #8). Migrates the three list fetches
+in `ChatView` — `Chat.list`, `Agents.list`, `Teams.list` — off
+ad-hoc `useState` + `useEffect` and onto `@tanstack/react-query`,
+giving the renderer a shared cache, automatic focus-refetch, and a
+single place to invalidate after mutations.
+
+- **`package.json`.** Adds `@tanstack/react-query ^5.62.0`. React-19
+  compatible, no peer-dep churn.
+- **`desktop-ui/main.tsx`.** Wraps `<App />` in a
+  `<QueryClientProvider>` with one shared `QueryClient`
+  (`staleTime: 30s`, `retry: 1`, `refetchOnWindowFocus: true`). The
+  sidecar is loopback so retries beyond one are noise; 30s staleness
+  matches the cadence at which AgentPanel / Settings mutations
+  should bubble back to the conversation list.
+- **`desktop-ui/components/chat/queries.ts`** (new, ~100 LOC).
+  Exports `useConversations({ enabled, limit })`, `useAgents({ enabled })`,
+  `useTeams({ enabled })`, the shared `queryKeys` factory
+  (`["conversations", limit]`, `["agents"]`, `["teams"]`), and two
+  pure helpers (`agentNameMap`, `teamNameMap`) that build the id →
+  display-name lookup the conversation list subtitles consume.
+  `useAgents` / `useTeams` swallow fetch errors into `[]` so a single
+  endpoint outage doesn't blank-screen the whole chat panel.
+- **`desktop-ui/components/ChatView.tsx`.** Replaces three
+  `useState` + `useEffect` blocks with three `useQuery` hook calls.
+  Removes the local `interface ConversationRow` (now imported from
+  `queries.ts`). Adds two `useCallback`-wrapped cache mutators —
+  `patchConversation(id, patch)` for optimistic single-row updates
+  (used by `useRoster.onLocalUpdate`) and `invalidateConversations()`
+  for the rollback + post-newConversation refresh paths. Stops
+  reading `Agents.list` / `Teams.list` directly; cleans the unused
+  imports.
+- **`desktop-ui/components/ChatView.test.tsx`.** Wraps the lone
+  `render(<ChatView />)` with `<QueryClientProvider client={…}>`,
+  using a fresh per-test `QueryClient` (retry off, gcTime 0,
+  staleTime 0) so cache state never leaks across tests. The
+  existing `vi.mock("@/api/client", …)` factory is untouched —
+  TanStack Query just exercises the same mocked `Chat.list` /
+  `Agents.list` / `Teams.list` calls the prior implementation did.
+- **`desktop-ui/components/chat/queries.test.tsx`** (new, 10 tests).
+  Pins the contract: `queryKeys` shape (per-limit conversations,
+  singleton agents/teams), name-map tolerance (empty/missing names
+  → "Agent" / "Team" fallback, missing ids skipped),
+  `useConversations` honors the requested `limit`, `enabled: false`
+  truly skips the fetch, `useAgents`/`useTeams` swallow fetch errors
+  into `[]`, and a fresh-cache second mount of `useConversations`
+  reuses the existing entry (no extra `Chat.list` call).
+
+## Verified
+
+- `npx vitest run desktop-ui/components/chat/queries.test.tsx`
+  → **10 passed**.
+- `npm run typecheck` — clean.
+- `npm run test:frontend` — **145 passed** across 16 files (up
+  from 135; +10 from this PR; no regressions in `ChatView.test.tsx`
+  after the provider wrap).
+- `npm run build` — clean (no new size-tier warnings beyond the
+  pre-existing mermaid / wardley chunks).
+
+## Stage-2 status (post-this-PR)
+
+- **#7 LangGraph 1.2 StateGraph orchestrator** — landed (PR #17).
+  Default flip gated on bench cycles.
+- **#8 ChatView decomposition** — **decomposition portion done**:
+    1. `chore/extract-derive-thinking-timeline` (PR open).
+    2. `chore/chatview-decomposition-part-2` (PR open, stacked).
+    3. **This PR** (`chore/chatview-tanstack-query`, stacked on #2).
+  Remaining sub-items deferred as separate efforts:
+  **shadcn/ui swap** (whole-UI library migration, multi-PR) and
+  **wider TanStack adoption** (RosterPicker / AgentPanel also fetch
+  `Agents.list` / `Teams.list` independently — they can now adopt
+  the same hooks and share the cache; a small follow-up).
+- **#9 Devin-style timeline** — pending. With `ThinkingTimeline`
+  extracted, building the drillable variant is now a sibling
+  component, not a refactor.
+- **#10 Visual TeamComposer** — pending. The `useRoster()` hook
+  from PR #2 plus the shared `useAgents()` / `useTeams()` from
+  this PR cover the full surface a redesigned composer needs.
+- **#11 Typed error envelopes** — pending.
+- **#12 Bundled llama-server binary** — pending.
+
+## Open / parallel branches
+
+- **`fix/roster-team-id-passthrough`** (PR open). Backend
+  one-liner — independent of all the ChatView work.
+- **`chore/extract-derive-thinking-timeline`** (PR open). First
+  decomposition PR. Merge first.
+- **`chore/chatview-decomposition-part-2`** (PR open, stacked on
+  #1). Second decomposition PR. Merge after #1.
+- **`chore/chatview-tanstack-query`** (PR open, stacked on #2,
+  **this PR**). Merge after #2.
+
+## Next up
+
+Three directions, roughly increasing in scope:
+
+1. **Adopt the new query hooks in RosterPicker and AgentPanel.**
+   Both still hit `Agents.list` / `Teams.list` directly with their
+   own `useState` + `useEffect`. Switching them to `useAgents()` /
+   `useTeams()` gives them cache sharing with ChatView and removes
+   the "rename in AgentPanel, conversation list shows old name
+   until reload" UX paper cut. ~30 lines per component.
+2. **Stage-2 #9 — Devin-style timeline.** New sibling component
+   over `deriveThinkingTimeline`'s output, no ChatView surgery.
+3. **Stage-2 #10 — Visual TeamComposer.** Render-layer rewrite of
+   `RosterPicker` against the new hook surface (`useRoster` +
+   `useAgents` + `useTeams`).
+
+## Walls hit
+
+None this session. One TypeScript thing worth pinning for future
+hook extractions in this file: `ChatView` defines a lot of state at
+the top and a lot of closures (handlers) further down that reference
+that state. When introducing a new hook that consumes a derived
+value like `ready`, the new hook's call site has to land *after*
+`ready` is in scope — TS2448/TS2454 caught the use-before-declaration
+the moment the query hooks landed at line ~140 while `ready` was
+declared at line ~241. Resolved by hoisting `const ready =
+status?.status === "ready"` up next to its `status` source.
+
+The TanStack Query migration is roughly LOC-neutral on ChatView
+(−8) but the architectural win is bigger: server state now has a
+single canonical source. Mutations from any component (a future
+AgentPanel rename, a future Settings change to the default agent)
+can call `queryClient.invalidateQueries({ queryKey: ["agents"] })`
+and the conversation list subtitles refresh automatically, without
+plumbing a callback through props or relying on the window-focus
+hack. The test-side wrapper is the only friction — and it's a
+three-line `QueryClientProvider` insertion.
+
+---
+
+<!-- Earlier handoff content preserved below for cross-session reference. -->
+
+# Earlier session — `chore/chatview-decomposition-part-2` (commit `b1e897a`)
+
+**Last commit:** b1e897a — `chore(ui): extract derivePipelineLive, ThinkingTimeline, useRoster from ChatView`
+**Branch:** `chore/chatview-decomposition-part-2` · **Pushed:** yes (PR open) · **Stacked on:** `chore/extract-derive-thinking-timeline`
 **Date:** 2026-05-18
 
 ## What just shipped (this branch)

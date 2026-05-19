@@ -1,9 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { ChatView } from "./ChatView";
 import { useAppStore } from "@/stores/appStore";
+
+// A fresh QueryClient per test prevents cross-test cache leakage. Retries
+// are off so a transient mock failure surfaces immediately rather than
+// being papered over by TanStack Query's default retry behaviour.
+function makeTestQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0, staleTime: 0 },
+    },
+  });
+}
 
 // ChatView pulls every backend surface it touches through @/api/client.
 // Mock just the methods the export menu exercises plus the bootstrapping
@@ -169,7 +181,11 @@ afterEach(() => {
 });
 
 async function renderWithLoadedConversation(): Promise<void> {
-  render(<ChatView />);
+  render(
+    <QueryClientProvider client={makeTestQueryClient()}>
+      <ChatView />
+    </QueryClientProvider>,
+  );
   await waitFor(() => {
     expect(screen.getByTestId("chat-export-button")).toBeTruthy();
   });

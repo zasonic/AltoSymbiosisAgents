@@ -76,6 +76,13 @@ desktop-ui/components/RosterPicker.tsx - AgentRow
 desktop-ui/components/chat/useRoster.ts - UseRosterArgs
 desktop-ui/components/chat/useRoster.ts - UseRosterResult
 
+# ── components/chat/queries.ts: slim AgentRow row type ──────────────────────
+# Mirrors the RosterPicker.tsx pattern above — exported as the typed
+# row shape useAgents() returns, currently used only by helpers within
+# the same module (agentNameMap). Kept exported so RosterPicker /
+# AgentPanel can later adopt useAgents() without duplicating the shape.
+desktop-ui/components/chat/queries.ts - AgentRow
+
 # ── api/sse.ts: internal types referenced within the module only ────────────
 desktop-ui/api/sse.ts - EventHandler
 desktop-ui/api/sse.ts - EventSubscription
