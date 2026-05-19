@@ -357,10 +357,7 @@ class BundledServer:
         ``start()`` will resolve, so this stays in lockstep with the runtime
         check at routes/system.py: /api/system/bundled/status surfaces it.
         """
-        try:
-            return paths.bundled_server_binary().exists()
-        except OSError:
-            return False
+        return paths.bundled_server_binary().exists()
 
     def start(self, model_path: str, *, model_id: str | None = None) -> int:
         """Spawn llama-server bound to a random localhost port.

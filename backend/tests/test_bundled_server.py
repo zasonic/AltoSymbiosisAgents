@@ -322,16 +322,3 @@ class TestBinaryAvailable:
         )
         assert server.binary_available() is False
 
-    def test_swallows_oserror_into_false(self, server, monkeypatch):
-        # Path.exists() can raise OSError (PermissionError on Windows when
-        # the path's parent is on an inaccessible mount; ENAMETOOLONG on
-        # some filesystems). The helper is a wizard probe, never a crash
-        # path, so it must return a clean bool. Stand in a fake Path whose
-        # ``.exists()`` raises and verify the catch.
-        class _RaisingPath:
-            def exists(self) -> bool:
-                raise OSError("simulated filesystem error")
-        monkeypatch.setattr(
-            bundled_module.paths, "bundled_server_binary", _RaisingPath,
-        )
-        assert server.binary_available() is False
