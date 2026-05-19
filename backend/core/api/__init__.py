@@ -827,8 +827,10 @@ class API:
     def chat_set_conversation_agent(self, conversation_id, agent_id=""):
         return self._chat_api.chat_set_conversation_agent(conversation_id, agent_id)
 
-    def chat_set_conversation_roster(self, conversation_id, agent_ids):
-        return self._chat_api.chat_set_conversation_roster(conversation_id, agent_ids)
+    def chat_set_conversation_roster(self, conversation_id, agent_ids, team_id=None):
+        return self._chat_api.chat_set_conversation_roster(
+            conversation_id, agent_ids, team_id=team_id,
+        )
 
     def chat_delete_conversation(self, conversation_id):
         return self._chat_api.chat_delete_conversation(conversation_id)
