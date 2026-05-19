@@ -15,7 +15,6 @@ import {
 } from "react-window";
 
 import {
-  Agents,
   Attachments,
   Chat,
   Models,
@@ -27,7 +26,6 @@ import {
   type ConversationExportFormat,
   type PromptTemplate,
   type SearchResult,
-  type TeamRow,
 } from "@/api/client";
 import { t } from "@/i18n";
 import {
@@ -46,19 +44,21 @@ import {
 } from "@/components/chat/derivePipelineLive";
 import { ThinkingTimeline } from "@/components/chat/ThinkingTimeline";
 import { useRoster } from "@/components/chat/useRoster";
+import {
+  agentNameMap,
+  queryKeys,
+  teamNameMap,
+  useAgents,
+  useConversations,
+  useTeams,
+  type ConversationRow,
+} from "@/components/chat/queries";
+import { useQueryClient } from "@tanstack/react-query";
 import { MessageRenderer } from "@/components/MessageRenderer";
 import { MessageErrorBoundary } from "@/components/MessageErrorBoundary";
 import { ModelSwitcher } from "@/components/ModelSwitcher";
 import { RosterPicker, type RosterPick } from "@/components/RosterPicker";
 import { useAppStore } from "@/stores/appStore";
-
-interface ConversationRow {
-  id: string;
-  title?: string;
-  agent_id?: string | null;
-  team_id?: string | null;
-  updated_at?: string;
-}
 
 type ChatItem =
   | { kind: "message"; key: string; msg: MessageRow }
@@ -108,6 +108,7 @@ function estimateTokens(text: string): number {
 
 export function ChatView() {
   const status = useAppStore((s) => s.sidecarStatus);
+  const ready = status?.status === "ready";
   const activeChat = useAppStore((s) => s.activeChat);
   const startChatStream = useAppStore((s) => s.startChatStream);
   const endChatStream = useAppStore((s) => s.endChatStream);
@@ -134,14 +135,44 @@ export function ChatView() {
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const [recordingTick, setRecordingTick] = useState<number>(0);
 
-  const [conversations, setConversations] = useState<ConversationRow[]>([]);
-  // Phase 3: id → display name lookup so the conversation list can subtitle
-  // each row with the agent/team currently bound to it. Cheap on the way in
-  // (one Agents.list + Teams.list at mount) and rebound when an agent/team
-  // is renamed inside AgentPanel (the focus listener already refreshes the
-  // active-chat settings; same handler refetches these tables).
-  const [agentNames, setAgentNames] = useState<Record<string, string>>({});
-  const [teamNames, setTeamNames] = useState<Record<string, string>>({});
+  // Conversation list, agent/team name maps. All three are server-state
+  // owned by the sidecar — TanStack Query handles staleness, focus-refetch,
+  // and shared caching across components (RosterPicker, AgentPanel) so
+  // mutations elsewhere bubble back without a per-component reload effect.
+  const queryClient = useQueryClient();
+  const conversationsQuery = useConversations({ enabled: ready });
+  const agentsQuery        = useAgents({ enabled: ready });
+  const teamsQuery         = useTeams({ enabled: ready });
+  const conversations = useMemo(
+    () => conversationsQuery.data ?? [],
+    [conversationsQuery.data],
+  );
+  const agentNames = useMemo(
+    () => agentNameMap(agentsQuery.data),
+    [agentsQuery.data],
+  );
+  const teamNames = useMemo(
+    () => teamNameMap(teamsQuery.data),
+    [teamsQuery.data],
+  );
+
+  // Patch the active conversation row in the query cache after a successful
+  // backend write. Reaching into the cache (rather than re-fetching) keeps
+  // the UI from flickering and avoids a needless round-trip.
+  const patchConversation = useCallback(
+    (id: string, patch: Partial<ConversationRow>) => {
+      queryClient.setQueryData<ConversationRow[]>(
+        queryKeys.conversations(50),
+        (prev) => (prev ?? []).map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      );
+    },
+    [queryClient],
+  );
+  const invalidateConversations = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+    [queryClient],
+  );
+
   const [activeId, setActiveId] = useState<string>("");
 
   // Roster binding (current + pending) and the apply-to-backend path.
@@ -160,17 +191,8 @@ export function ChatView() {
     activeAgentId: _rosterRow?.agent_id ?? null,
     activeTeamId: _rosterRow?.team_id ?? null,
     onLocalUpdate: (agentId, teamId) =>
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === activeId
-            ? { ...c, agent_id: agentId, team_id: teamId }
-            : c,
-        ),
-      ),
-    onRollback: async () => {
-      const rows = (await Chat.list(50)) as ConversationRow[];
-      setConversations(rows);
-    },
+      patchConversation(activeId, { agent_id: agentId, team_id: teamId }),
+    onRollback: invalidateConversations,
   });
 
   const [messages, setMessages] = useState<MessageRow[]>([]);
@@ -217,7 +239,6 @@ export function ChatView() {
   // Enter to commit a composition, which would otherwise submit the form
   // and lose the half-typed glyph.
   const composingRef = useRef(false);
-  const ready = status?.status === "ready";
 
   // Seed the voice toggles and active-model pricing from the sidecar on first ready.
   useEffect(() => {
@@ -273,51 +294,23 @@ export function ChatView() {
     return () => window.clearInterval(id);
   }, [voiceRecording.isRecording]);
 
-  // Load conversation list once the sidecar is ready.
+  // Conversations / agents / teams are fetched by useQuery above. The only
+  // local effect this layer needs is auto-selecting the most-recent
+  // conversation on first load when no activeId is set yet.
   useEffect(() => {
-    if (!ready) return;
-    let alive = true;
-    (async () => {
-      try {
-        const rows = (await Chat.list(50)) as ConversationRow[];
-        if (alive) setConversations(rows);
-        if (alive && rows.length && !activeId) setActiveId(rows[0].id);
-      } catch (err) {
-        if (alive) setLoadError(err instanceof Error ? err.message : String(err));
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [ready, activeId]);
+    if (!conversationsQuery.data?.length || activeId) return;
+    setActiveId(conversationsQuery.data[0].id);
+  }, [conversationsQuery.data, activeId]);
 
-  // Phase 3: hydrate the agent/team name lookup so the conversation list can
-  // subtitle each row with who's bound to it. The lists are tiny (<100 rows
-  // total for any realistic install), so a single fetch on ready is cheap.
   useEffect(() => {
-    if (!ready) return;
-    let alive = true;
-    Promise.all([
-      Agents.list().catch(() => [] as { id?: string; name?: string }[]),
-      Teams.list().catch(() => [] as TeamRow[]),
-    ]).then(([rawAgents, rawTeams]) => {
-      if (!alive) return;
-      const agents = rawAgents as { id?: string; name?: string }[];
-      const aMap: Record<string, string> = {};
-      for (const a of agents) {
-        if (a?.id) aMap[a.id] = a.name || "Agent";
-      }
-      const tMap: Record<string, string> = {};
-      for (const team of rawTeams) {
-        if (team?.id) tMap[team.id] = team.name || "Team";
-      }
-      setAgentNames(aMap);
-      setTeamNames(tMap);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [ready]);
+    if (conversationsQuery.error) {
+      setLoadError(
+        conversationsQuery.error instanceof Error
+          ? conversationsQuery.error.message
+          : String(conversationsQuery.error),
+      );
+    }
+  }, [conversationsQuery.error]);
 
   // Load messages when active conversation changes.
   useEffect(() => {
@@ -464,8 +457,7 @@ export function ChatView() {
       }
 
       setActiveId(id);
-      const rows = (await Chat.list(50)) as ConversationRow[];
-      setConversations(rows);
+      await invalidateConversations();
     } catch (err) {
       pushToast({
         kind: "error",
