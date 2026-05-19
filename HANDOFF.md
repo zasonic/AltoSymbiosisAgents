@@ -1,5 +1,119 @@
 # Handoff
 
+**Latest on `main`:** `efa4c85` (Merge PR #25 — Stage-2 #9 settings toggle)
+**Branch:** `feat/visual-team-composer` · **Pushed:** pending
+**Status:** Stage-2 #10 — RosterPicker rewritten as a chip-card composer with auto-coordinator badge + shared TanStack cache.
+**Date:** 2026-05-19
+
+## What just shipped (this branch — Stage 2 #10 Visual TeamComposer)
+
+**Stage-2 item #10 — RosterPicker render-layer rewrite.** Replaces the
+checkbox-column dropdown with a 2-column chip-card grid that surfaces
+the role badge and auto-picks a coordinator when 2+ agents are drafted.
+Public props (`agentId` / `teamId` / `onApply` / `disabled`) and the
+`RosterPick` contract are unchanged — the ChatView call site is
+untouched.
+
+- **`desktop-ui/components/RosterPicker.tsx`** (rewritten, 416 LOC, was
+  455).
+  - Agent list: chip cards in a `grid grid-cols-1 sm:grid-cols-2 gap-1.5`.
+    Each card carries a 7×7 initials avatar, name, role pill or
+    Coordinator badge, and a 2-line description clamp. Selected state
+    is `bg-accent/10 border-accent shadow-soft-1`, not a tick.
+  - Coordinator pick: when `draft.size >= 2`, compute the agent with
+    `role.toLowerCase() === "coordinator"`, else the first selected
+    agent by registry order. When a saved-team chip is the active
+    draft, surface its stored `coordinator_id` verbatim. Mirrors the
+    backend logic at `backend/services/agent_registry.py:840`.
+  - Footer summary: `"Coordinator: <name> · Team of N"` when a
+    coordinator is in play, otherwise just the draft summary.
+  - **Data sources migrated** off local `useState` + `useEffect` onto
+    the shared `useAgents()` / `useTeams()` hooks from
+    `chat/queries.ts`. Picker now shares the TanStack cache with
+    ChatView, gets focus refetch + invalidation for free, and the
+    `Agents.list()` / `Teams.list()` calls collapse to one network
+    request per renderer rather than two (#8 hook-adoption follow-up
+    closed for RosterPicker).
+- **`desktop-ui/components/RosterPicker.test.tsx`** (new, 18 tests).
+  Pill (4): "No agent" label, active agent label, pill opens dropdown,
+  sidecar-gated disable. Chip-card grid (4): renders agent + "No
+  agent" pseudo-card, hydrates `aria-checked` from `agentId` prop,
+  click toggles, search filters by name/role/description. Coordinator
+  auto-pick (3): no badge for solo, role=coordinator wins over
+  registry order, fallback to first by registry order when no
+  coordinator role. Saved-team chips (3): chip per non-adhoc team,
+  ad-hoc teams hidden, picking hydrates draft + surfaces stored
+  coordinator. Apply (4): solo, ad-hoc multi, teamId-routed,
+  unbind-to-empty.
+
+## Verified
+
+- `npx vitest run desktop-ui/components/RosterPicker.test.tsx` —
+  **18 passed** in 1.3s.
+- `npm run typecheck` — clean (both `tsconfig.node.json` and
+  `tsconfig.web.json`).
+- `npm run test:frontend` — **186 passed** across 19 files (was 168;
+  +18 from this PR's RosterPicker.test.tsx).
+- `npm run build` — clean (5.9s).
+
+## Stage-2 status (post-this-PR)
+
+- **#7 LangGraph 1.2 StateGraph orchestrator** — landed (PR #17).
+  Default still `"legacy"`; flip gated on bench cycles.
+- **#8 ChatView decomposition** — done; RosterPicker's hook adoption
+  (this PR) closes one of the follow-ups. AgentPanel still owns its
+  own `useState` + `useEffect` and would be a similar ~30-LOC swap.
+- **#9 Devin-style timeline** — done end-to-end (PR #24 + #25).
+- **#10 Visual TeamComposer** — **landed (this PR).**
+- **#11 Typed error envelopes** — pending (next).
+- **#12 Bundled llama-server binary** — pending.
+
+## Next up
+
+1. **#11 — typed error envelopes.** Backend work; converts
+   `HTTPException(status_code, detail="string")` raises across
+   `backend/routes/*.py` into a discriminated-union JSON shape
+   (`{error_type, status_code, detail, hint?}`) the renderer can
+   pattern-match. Add a FastAPI exception handler + a `domain_error()`
+   helper, then migrate the noisiest routes (chat, voice, attachments,
+   conversations).
+2. **#12 — bundled llama-server binary.** Resolve the `TODO(engines)`
+   in `desktop-shell/bootstrap/bin_manager.ts:44`: extend
+   `isBootstrapped()` with an `existsSync` check on
+   `<binRoot>/engines/llama-server.exe` so Electron's readiness gate
+   actually verifies the binary is present before sidecar boot.
+   `bundled_server.py` already errors cleanly when the binary is
+   missing (lines 366-372) — this is the bootstrap-side counterpart.
+3. **#8 hook-adoption follow-up.** Migrate `AgentPanel.tsx` off its
+   own `useState` + `useEffect` fetches onto `useAgents()` /
+   `useTeams()` from `chat/queries.ts` (RosterPicker just did it).
+4. **#7 follow-up.** Weekly AgentDojo + agentic-misalignment bench
+   cycles under `orchestrator_engine="graph"`; two consecutive clean
+   runs gate the default flip.
+
+## Walls hit
+
+The codebase doesn't use jest-dom matchers (no `toHaveTextContent` /
+`toHaveAttribute` / `toBeInTheDocument`). First test pass leaned on
+those and failed with "Invalid Chai property" until rewritten with raw
+DOM assertions (`el.textContent.includes(...)`,
+`el.getAttribute("aria-checked") === "true"`,
+`(el as HTMLButtonElement).disabled === true`). Worth pinning for
+future test files in this repo.
+
+The `useAgents()` / `useTeams()` hook surface returns
+`AgentRow[] | undefined` (an in-flight query is `undefined`, not `[]`).
+`useMemo` over `(query.data ?? [])` handles that, but the same data is
+read for `useTeams()` with a `.filter((t) => !t.is_adhoc)` step — that
+filter has to live downstream of the `?? []` or you'll get a TypeError
+on the very first render before the query lands.
+
+---
+
+<!-- Earlier handoff content preserved below for cross-session reference. -->
+
+# Earlier session — `feat/timeline-variant-toggle` (merged via PR #25)
+
 **Latest on `main`:** `3fca374` (Merge PR #24 — DevinTimeline drillable variant)
 **Branch:** `feat/timeline-variant-toggle` · **Pushed:** pending
 **Status:** Stage-2 #9 wired behind a `timeline_variant` setting (Appearance group).
