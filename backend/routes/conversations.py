@@ -12,7 +12,8 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import db as _db
-from fastapi import APIRouter, HTTPException, Query
+from core.errors import DomainError
+from fastapi import APIRouter, Query
 
 router = APIRouter()
 
@@ -66,9 +67,9 @@ async def search_messages(
     """
     cleaned = (q or "").strip()
     if not cleaned:
-        raise HTTPException(status_code=400, detail="Invalid search query")
+        raise DomainError.invalid_search_query()
     if len(cleaned) > _MAX_QUERY_LEN:
-        raise HTTPException(status_code=400, detail="Invalid search query")
+        raise DomainError.invalid_search_query()
 
     threshold = _threshold_iso(days)
 
@@ -79,7 +80,7 @@ async def search_messages(
         # operators, reserved tokens) as OperationalError. Translate to a
         # 400 with a friendly message — leaking the sqlite text would be
         # noisy and unhelpful for end users.
-        raise HTTPException(status_code=400, detail="Invalid search query")
+        raise DomainError.invalid_search_query()
 
     return [
         {
