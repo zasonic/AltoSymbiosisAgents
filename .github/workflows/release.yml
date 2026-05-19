@@ -11,9 +11,9 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
 
@@ -21,7 +21,7 @@ jobs:
       # itself no longer needs Python at build time — bootstrap (Miniconda
       # + sidecar venv) happens on first launch of the installed app, see
       # desktop-shell/bootstrap/.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -65,7 +65,7 @@ jobs:
           "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Append SHA256 to release body
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           ASSET_NAME: ${{ steps.hash.outputs.name }}
           ASSET_SHA256: ${{ steps.hash.outputs.sha256 }}
