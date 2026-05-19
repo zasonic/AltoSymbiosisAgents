@@ -89,6 +89,11 @@ def app_with_fake_api(tmp_path):
     fake_bundled.is_running.return_value = False
     fake_bundled.port.return_value = None
     fake_bundled.model_id.return_value = None
+    # Stage-2 #12: /bundled/status surfaces a binary_available bool. The
+    # MagicMock default would return another MagicMock and break JSON
+    # serialisation, so pin a concrete True; per-test setattr overrides
+    # this for the missing-binary case.
+    fake_bundled.binary_available.return_value = True
 
     fake_api = MagicMock()
     fake_api.local_client = fake_local
@@ -219,6 +224,8 @@ class TestBundledStatus:
         body = resp.json()
         assert body["running"] is False
         assert body["available"] is True
+        # Stage-2 #12: binary_available is surfaced for the wizard.
+        assert body["binary_available"] is True
 
     def test_reports_available_false_when_handle_is_none(self, app_with_fake_api):
         app, _, _ = app_with_fake_api
@@ -227,7 +234,26 @@ class TestBundledStatus:
         resp = client.get("/api/system/bundled/status",
                           headers=_auth_headers())
         assert resp.status_code == 200
-        assert resp.json()["available"] is False
+        body = resp.json()
+        assert body["available"] is False
+        # Both unavailability flags collapse to False when the service
+        # itself hasn't been wired (e.g. sidecar boot bailed early).
+        assert body["binary_available"] is False
+
+    def test_reports_binary_missing_when_helper_returns_false(
+        self, app_with_fake_api,
+    ):
+        # Stage-2 #12: the wizard reads binary_available to show the
+        # "engine binary not installed" guidance without trying to start.
+        app, _, fake_bundled = app_with_fake_api
+        fake_bundled.binary_available.return_value = False
+        client = TestClient(app)
+        resp = client.get("/api/system/bundled/status",
+                          headers=_auth_headers())
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["available"] is True       # service is wired
+        assert body["binary_available"] is False  # …but the engine isn't there
 
     def test_rejects_without_bearer_auth(self, app_with_fake_api):
         app, _, _ = app_with_fake_api
