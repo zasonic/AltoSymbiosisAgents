@@ -38,8 +38,14 @@ import {
 import {
   deriveThinkingTimeline,
   type ThinkingRow,
-  type ThinkingRowState,
 } from "@/components/chat/deriveThinkingTimeline";
+import {
+  derivePipelineLive,
+  type PipelineLive,
+  type PipelinePhase,
+} from "@/components/chat/derivePipelineLive";
+import { ThinkingTimeline } from "@/components/chat/ThinkingTimeline";
+import { useRoster } from "@/components/chat/useRoster";
 import { MessageRenderer } from "@/components/MessageRenderer";
 import { MessageErrorBoundary } from "@/components/MessageErrorBoundary";
 import { ModelSwitcher } from "@/components/ModelSwitcher";
@@ -71,110 +77,8 @@ interface ChatRowData {
   voiceOutputEnabled: boolean;
 }
 
-// Live pipeline phases derived from the SSE stream so the streaming bubble
-// can show a "Decomposing… → Step n/N → Synthesising…" subtitle alongside
-// any per-step attribution chips. Defaults to "idle" before any pipeline
-// event fires (single-agent turns stay that way).
-type PipelinePhase =
-  | "idle"
-  | "decomposing"
-  | "running"
-  | "synthesising"
-  | "complete";
-
-interface PipelineLive {
-  steps: PipelineStep[];
-  phase: PipelinePhase;
-}
-
-interface PipelinePlanEvent {
-  type?: string;
-  steps?: { agent?: string; task?: string }[];
-}
-
-interface PipelineStepStartedEvent {
-  type?: string;
-  step?: number;
-  total?: number;
-  agent?: string;
-  task?: string;
-}
-
-interface PipelineStepCompleteEvent {
-  type?: string;
-  step?: number;
-  agent?: string;
-  task?: string;
-  confidence?: string;
-  validation_passed?: boolean;
-  tokens?: number;
-  duration_ms?: number;
-  challenger_signal?: boolean;
-}
-
-// Rebuild the live pipeline state from the SSE event log. We don't store
-// per-step status incrementally on the store — the events list is already
-// the source of truth, and re-deriving on each render keeps the store free
-// of pipeline-specific shape. Returns idle steps[] when no pipeline events
-// have fired so single-agent turns add no overhead.
-function _derivePipelineLive(
-  events: { type: string; data: unknown; at: number }[],
-): PipelineLive {
-  const stepMap = new Map<number, PipelineStep>();
-  let phase: PipelinePhase = "idle";
-  for (const evt of events) {
-    if (evt.type === "pipeline_decomposing") {
-      phase = "decomposing";
-    } else if (evt.type === "pipeline_plan") {
-      const data = evt.data as PipelinePlanEvent;
-      const steps = Array.isArray(data?.steps) ? data.steps : [];
-      stepMap.clear();
-      steps.forEach((s, i) => {
-        stepMap.set(i + 1, {
-          step: i + 1,
-          agent: s.agent || "Specialist",
-          task: s.task ?? "",
-        });
-      });
-      phase = "running";
-    } else if (evt.type === "pipeline_step_started") {
-      const data = evt.data as PipelineStepStartedEvent;
-      const idx = typeof data?.step === "number" ? data.step : 0;
-      if (!idx) continue;
-      const prev = stepMap.get(idx);
-      stepMap.set(idx, {
-        step: idx,
-        agent: data?.agent || prev?.agent || "Specialist",
-        task: data?.task ?? prev?.task ?? "",
-      });
-      phase = "running";
-    } else if (evt.type === "pipeline_step_complete") {
-      const data = evt.data as PipelineStepCompleteEvent;
-      const idx = typeof data?.step === "number" ? data.step : 0;
-      if (!idx) continue;
-      const prev = stepMap.get(idx);
-      stepMap.set(idx, {
-        step: idx,
-        agent: data?.agent || prev?.agent || "Specialist",
-        task: data?.task ?? prev?.task ?? "",
-        confidence: data?.confidence,
-        validation_passed: data?.validation_passed,
-        tokens: data?.tokens,
-        duration_ms: data?.duration_ms,
-        challenger_signal: data?.challenger_signal,
-      });
-    } else if (evt.type === "pipeline_synthesising") {
-      phase = "synthesising";
-    } else if (evt.type === "pipeline_complete") {
-      phase = "complete";
-    }
-  }
-  const steps = Array.from(stepMap.values()).sort((a, b) => a.step - b.step);
-  return { steps, phase };
-}
-
-// Thinking-timeline reducer + supporting event shapes live in
-// @/components/chat/deriveThinkingTimeline (extracted from this file).
+// Live-pipeline and thinking-timeline reducers + their event shapes live in
+// @/components/chat/derivePipelineLive and @/components/chat/deriveThinkingTimeline.
 
 // PR 11: image input. Browser MIME types we accept for vision blocks.
 // The backend mirrors this list — keep them in sync.
@@ -239,11 +143,36 @@ export function ChatView() {
   const [agentNames, setAgentNames] = useState<Record<string, string>>({});
   const [teamNames, setTeamNames] = useState<Record<string, string>>({});
   const [activeId, setActiveId] = useState<string>("");
-  // Roster picked for the next new conversation when none is active yet.
-  // Existing conversations read their binding from the conversation row.
-  const [pendingRoster, setPendingRoster] = useState<RosterPick>({
-    agentIds: [],
+
+  // Roster binding (current + pending) and the apply-to-backend path.
+  // Reads the active conversation's stored binding via the conversations
+  // list; falls back to the pending pick for the next new conversation when
+  // none is active. See @/components/chat/useRoster for the full surface.
+  const _rosterRow = conversations.find((c) => c.id === activeId);
+  const {
+    pendingRoster,
+    setPendingRoster,
+    currentAgentId,
+    currentTeamId,
+    applyRoster,
+  } = useRoster({
+    activeId,
+    activeAgentId: _rosterRow?.agent_id ?? null,
+    activeTeamId: _rosterRow?.team_id ?? null,
+    onLocalUpdate: (agentId, teamId) =>
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeId
+            ? { ...c, agent_id: agentId, team_id: teamId }
+            : c,
+        ),
+      ),
+    onRollback: async () => {
+      const rows = (await Chat.list(50)) as ConversationRow[];
+      setConversations(rows);
+    },
   });
+
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [input, setInput] = useState<string>("");
   // PR 18: snippet dropdown. ``slashOpen`` is true whenever the input
@@ -1025,7 +954,7 @@ export function ChatView() {
   const streamingEvents =
     activeChat?.conversationId === activeId ? activeChat.events : null;
   const pipelineLive = useMemo<PipelineLive>(
-    () => (streamingEvents ? _derivePipelineLive(streamingEvents) : { steps: [], phase: "idle" }),
+    () => (streamingEvents ? derivePipelineLive(streamingEvents) : { steps: [], phase: "idle" }),
     [streamingEvents],
   );
   const thinkingTimeline = useMemo<ThinkingRow[]>(
@@ -1037,64 +966,6 @@ export function ChatView() {
     [conversations, activeId],
   );
 
-  // What the RosterPicker displays. For an active conversation, read its
-  // stored binding (agent_id XOR team_id); otherwise show whatever roster the
-  // user lined up for the next new conversation.
-  const currentAgentId = activeId
-    ? (activeConversation?.agent_id ?? "")
-    : (pendingRoster.agentIds.length === 1 && !pendingRoster.teamId
-        ? pendingRoster.agentIds[0]
-        : "");
-  const currentTeamId = activeId
-    ? (activeConversation?.team_id ?? "")
-    : (pendingRoster.teamId ?? "");
-
-  const applyRoster = async (pick: RosterPick) => {
-    if (!activeId) {
-      // No conversation yet — stash the pick and apply on next new chat.
-      setPendingRoster(pick);
-      return;
-    }
-    try {
-      let result: { agent_id: string | null; team_id: string | null };
-      if (pick.teamId) {
-        // Picking a saved team preset: hand the team_id over directly so
-        // the backend skips the find_or_create_adhoc_team detour and binds
-        // straight to the saved row. Without the override the orchestrator
-        // could rebind to a coincidentally-matching ad-hoc team or create
-        // a duplicate ad-hoc copy of the saved team (Phase 4 fix).
-        const team = (await Teams.get(pick.teamId)) as {
-          members?: { id: string }[];
-        };
-        const memberIds = (team?.members ?? []).map((m) => m.id);
-        if (memberIds.length === 0) {
-          throw new Error("Selected team has no members");
-        }
-        const rsp = await Chat.setConversationRoster(
-          activeId, memberIds, pick.teamId,
-        );
-        result = { agent_id: rsp.agent_id, team_id: rsp.team_id };
-      } else {
-        const rsp = await Chat.setConversationRoster(activeId, pick.agentIds);
-        result = { agent_id: rsp.agent_id, team_id: rsp.team_id };
-      }
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === activeId
-            ? { ...c, agent_id: result.agent_id, team_id: result.team_id }
-            : c,
-        ),
-      );
-    } catch (err) {
-      pushToast({
-        kind: "error",
-        text: err instanceof Error ? err.message : "Could not change roster",
-      });
-      // Roll back from server.
-      const rows = (await Chat.list(50)) as ConversationRow[];
-      setConversations(rows);
-    }
-  };
 
   // Unified item stream so the virtualized list can render messages and the
   // streaming preview as a single scrollable surface.
@@ -1985,57 +1856,8 @@ function ChatListRow({ index, style, data }: ListChildComponentProps<ChatRowData
 // yet render as "in progress"; once pipeline_step_complete arrives, the
 // chip switches to the same accent/warn palette the persisted strip uses.
 
-// ── Thinking timeline rows ──────────────────────────────────────────────────
-//
-// Renders one row per non-chip lifecycle event (see deriveThinkingTimeline).
-// Sits between the live pipeline chips and the buffer/spinner inside the
-// streaming bubble, which is already wrapped in aria-live="polite", so each
-// new row is announced by screen readers. role="status" on every row makes
-// the announcement explicit even if the row is re-rendered outside the
-// streaming bubble in the future.
-
-function _thinkingRowTone(state: ThinkingRowState): string {
-  switch (state) {
-    case "error":
-      return "border-err/40 bg-err/10 text-err";
-    case "warn":
-      return "border-warn/40 bg-warn/10 text-ink";
-    case "ok":
-      return "border-accent/30 bg-accent/10 text-ink";
-    default:
-      return "border-line bg-bg-1 text-ink-dim";
-  }
-}
-
-function ThinkingTimeline({ rows }: { rows: ThinkingRow[] }) {
-  return (
-    <ol
-      data-testid="chat-stream-timeline"
-      className="mb-2 space-y-1 text-[11px] list-none"
-      aria-live="polite"
-      aria-atomic="false"
-    >
-      {rows.map((r) => (
-        <li
-          key={r.key}
-          role="status"
-          data-testid={`thinking-row-${r.key}`}
-          className={`rounded-md border px-2 py-1 ${_thinkingRowTone(r.state)}`}
-        >
-          <div className="flex items-center gap-1.5">
-            <span aria-hidden="true">{r.icon}</span>
-            <span className="font-medium">{r.label}</span>
-          </div>
-          {r.detail && (
-            <div className="mt-0.5 text-ink-dim line-clamp-2 break-words">
-              {r.detail}
-            </div>
-          )}
-        </li>
-      ))}
-    </ol>
-  );
-}
+// ThinkingTimeline component lives in @/components/chat/ThinkingTimeline
+// (extracted from this file).
 
 function LivePipelineAttribution({
   steps,

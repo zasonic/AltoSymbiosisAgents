@@ -1,7 +1,177 @@
 # Handoff
 
-**Last commit:** _pending_ — `chore(ui): extract deriveThinkingTimeline from ChatView.tsx`
-**Branch:** `chore/extract-derive-thinking-timeline` · **Pushed:** no
+**Last commit:** _pending_ — `chore(ui): extract derivePipelineLive, ThinkingTimeline, useRoster from ChatView`
+**Branch:** `chore/chatview-decomposition-part-2` · **Pushed:** no · **Stacked on:** `chore/extract-derive-thinking-timeline`
+**Date:** 2026-05-18
+
+## What just shipped (this branch)
+
+**Stage 2 / item #8 — second PR** of the Atelier-blueprint ChatView
+decomposition. Continues the work started in
+`chore/extract-derive-thinking-timeline` (PR open) by extracting the
+remaining three natural seams: the live-pipeline reducer (sibling of
+the one that PR moved), the `ThinkingTimeline` rendering component
+(now decoupled from the data-shaping reducer), and the
+`pendingRoster` + `applyRoster` + current-binding derivations as a
+single `useRoster()` hook. Together with the first PR, `ChatView.tsx`
+goes from **2,762 → 2,154 LOC** (−608, ~22%).
+
+- **`desktop-ui/components/chat/events.ts`** (new). Shared
+  `StreamingEvent` type that the two reducers consume. Lifts the type
+  out of `deriveThinkingTimeline.ts` (which still re-exports it for
+  back-compat). One small thing here is the right place to centralise
+  — adding it now means future reducers and panel components hit a
+  shared seam rather than reaching across to a sibling module.
+- **`desktop-ui/components/chat/derivePipelineLive.ts`** (new, ~110
+  LOC). Verbatim move of the live-pipeline reducer. Same shape as
+  `deriveThinkingTimeline`: pure function over `StreamingEvent[]` →
+  `PipelineLive`. The 5 event-shape interfaces (`PipelinePlanEvent`,
+  `PipelineStepStartedEvent`, `PipelineStepCompleteEvent`) and the
+  `PipelinePhase` / `PipelineLive` types move with it; `PipelineStep`
+  is re-imported from the existing `chat/MessageBubble`. No renames
+  besides `_derivePipelineLive → derivePipelineLive`.
+- **`desktop-ui/components/chat/ThinkingTimeline.tsx`** (new, ~55
+  LOC). Verbatim move of the `ThinkingTimeline` component + its
+  private `_thinkingRowTone` palette helper (now module-local as
+  `rowTone`). The component is a pure render of `rows: ThinkingRow[]`
+  → JSX with state-keyed palette classes and the same
+  `data-testid="chat-stream-timeline"` / `role="status"` /
+  `aria-live="polite"` accessibility attributes the inline version
+  carried.
+- **`desktop-ui/components/chat/useRoster.ts`** (new, ~115 LOC).
+  Encapsulates the full roster surface that was scattered across
+  ChatView: `pendingRoster` useState, `currentAgentId` / `currentTeamId`
+  derived bindings, and the `applyRoster` async action with its
+  Teams.get → Chat.setConversationRoster flow and toast/rollback on
+  failure. Decoupled from ChatView's `ConversationRow` type by
+  accepting `activeAgentId` / `activeTeamId` props from the caller
+  plus `onLocalUpdate(agentId, teamId)` and `onRollback()` callbacks.
+  Toast is read directly from `useAppStore` (one fewer prop to
+  thread). The frontend bug pinned in
+  `fix/roster-team-id-passthrough` (PR open) lives below this hook
+  — same UX symptom would still appear if the backend regresses
+  again, but the hook itself is correct.
+- **`desktop-ui/components/ChatView.tsx`.** Imports the three new
+  modules (the reducer, the component, the hook), drops the inline
+  versions, and replaces the previously-inlined `pendingRoster` /
+  `currentAgentId` / `currentTeamId` / `applyRoster` block with one
+  destructured `useRoster({…})` call placed before `newConversation`
+  in the function body (so the closure over `pendingRoster` works
+  without TS2448 use-before-declaration). The thin pass-through
+  `_rosterRow = conversations.find(…)` is the only roster-specific
+  local left in the component; everything else moves into the hook.
+- **Tests.** Each new module ships with focused tests:
+  - `chat/derivePipelineLive.test.ts` (11 tests). Phase transitions
+    (idle → decomposing → running → synthesising → complete + the
+    re-enter-running case), step accumulation (plan ordering,
+    default-agent fallback, step_complete merging, no-step-number
+    drop, plan clears prior steps, out-of-order sort,
+    plan→step_started inheritance), and non-pipeline-events ignored.
+  - `chat/ThinkingTimeline.test.tsx` (5 tests). The OL is aria-live
+    polite; rows are role=status; icon/label/detail wire through;
+    `state` maps to the right tailwind palette class; empty input
+    renders an empty list.
+  - `chat/useRoster.test.tsx` (10 tests). Initial state; pending
+    pick surfaces (single-agent → currentAgentId, multi → empty,
+    teamId → currentTeamId); activeId reads from row props; applyRoster
+    stashes when no activeId; calls the right backend with agentIds
+    only / with teamId; empty-team rejection + rollback; backend
+    failure surfaces toast + onRollback.
+
+## Verified
+
+- `npx vitest run desktop-ui/components/chat/` — **41 passed** across
+  4 files (15 thinking-timeline reducer, 11 pipeline-live reducer,
+  5 ThinkingTimeline render, 10 useRoster hook).
+- `npm run typecheck` — clean (both tsconfig.node.json and
+  tsconfig.web.json).
+- `npm run test:frontend` — **135 passed** across 15 files (up from
+  109 baseline at the end of the first decomposition PR; +26 from
+  this PR's new files, no other-suite regressions).
+
+## Stage-2 status (post-this-PR)
+
+- **#7 LangGraph 1.2 StateGraph orchestrator** — landed (PR #17,
+  merged). Default flip gated on bench cycles.
+- **#8 ChatView decomposition** — **mostly done**. Three PRs landed
+  or pending merge:
+    1. `chore/extract-derive-thinking-timeline` (PR open).
+    2. **This PR** (`chore/chatview-decomposition-part-2`).
+  Remaining in-scope work for #8: **shadcn/ui swap** (whole-UI
+  library migration, deferred — different scope) and **TanStack
+  Query migration** (moves `Chat.list` / `Agents.list` / `Teams.list`
+  from `useEffect` + `useState` to cached queries; deferred — adds a
+  dependency and changes refresh semantics).
+- **#9 Devin-style timeline** — pending (depends on #7 + #8). Now
+  closer to feasible because `ThinkingTimeline` is a sibling
+  component; a drillable variant becomes a new component, not a
+  refactor.
+- **#10 Visual TeamComposer** — pending. The `useRoster()` hook
+  this PR adds is exactly the surface a redesigned TeamComposer
+  would consume — `currentAgentId` / `currentTeamId` /
+  `pendingRoster` / `applyRoster` cleanly cover both new-conversation
+  staging and active-conversation rebinding.
+- **#11 Typed error envelopes** — pending.
+- **#12 Bundled llama-server binary** — pending.
+
+## Open / parallel branches
+
+- **`fix/roster-team-id-passthrough`** (PR open). Backend one-liner.
+  Without this, the new `useRoster.applyRoster` will still surface a
+  toast and roll back — the UX bug repro path is unchanged.
+- **`chore/extract-derive-thinking-timeline`** (PR open, **this PR
+  is stacked on top of it**). Merge that one first; this branch
+  rebases cleanly afterward.
+
+## Next up
+
+Three directions, in roughly increasing scope:
+
+1. **Stage-2 #9 — Devin-style timeline.** With `ThinkingTimeline`
+   extracted and `deriveThinkingTimeline` unit-testable, the
+   drillable variant is a new sibling component that consumes the
+   same `ThinkingRow[]` data shape. No further ChatView surgery
+   required to start.
+2. **Stage-2 #10 — Visual TeamComposer.** Replace the
+   chip-list-in-popover RosterPicker UI with the more visual layout
+   from `[[multi_agent_ux_direction]]`. Backend hook (`useRoster`)
+   already exists; this is a render-layer rewrite.
+3. **Stage-2 #8 finish — TanStack Query migration.** Migrate the
+   three list fetches in ChatView (`Chat.list`, `Agents.list`,
+   `Teams.list`) onto cached queries with invalidation. Net win is
+   eliminating the focus-handler + manual reload paths scattered
+   around the component, but it's a dependency add and a semantics
+   change — separate PR.
+
+## Walls hit
+
+None this session. One process note worth saving for future
+multi-file extractions: do each contiguous block as a *single*
+Edit with the exact captured text (read the full range first), and
+re-run typecheck + the new tests immediately after each extraction
+rather than batching. The "extract A → typecheck → extract B → …"
+loop catches issues like the `pendingRoster used before declaration`
+TS2448 (which surfaced the moment the hook call landed below
+`newConversation`) before they pile up. Fix was to move the
+`useRoster` call up to right after `[activeId, setActiveId]` so the
+binding is established before any `const`-declared closure references
+it.
+
+The `StreamingEvent` type was previously inlined inside
+`deriveThinkingTimeline.ts` and exported from there. Adding a second
+reducer (`derivePipelineLive`) revealed that the type belonged in a
+shared seam, so it moved to `chat/events.ts` — and
+`deriveThinkingTimeline.ts` retains a `export type { StreamingEvent }`
+re-export so existing imports keep working.
+
+---
+
+<!-- Earlier handoff content preserved below for cross-session reference. -->
+
+# Earlier session — `chore/extract-derive-thinking-timeline` (commit `1368b41`)
+
+**Last commit:** 1368b41 — `chore(ui): extract deriveThinkingTimeline from ChatView.tsx`
+**Branch:** `chore/extract-derive-thinking-timeline` · **Pushed:** yes (PR open)
 **Date:** 2026-05-18
 
 ## What just shipped (this branch)
