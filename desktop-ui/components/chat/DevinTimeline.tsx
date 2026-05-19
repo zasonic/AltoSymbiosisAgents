@@ -48,10 +48,32 @@ export function DevinTimeline({ rows }: { rows: ThinkingRow[] }) {
       aria-atomic="false"
     >
       {rows.map((r) => {
-        const open      = expanded.has(r.key);
-        const panelId   = `devin-row-panel-${r.key}`;
-        const fullText  = r.expandedDetail ?? r.detail;
-        const showPanel = open && !!fullText;
+        const open       = expanded.has(r.key);
+        const panelId    = `devin-row-panel-${r.key}`;
+        const fullText   = r.expandedDetail ?? r.detail;
+        // A row is drillable when there's something the panel can show.
+        // Non-drillable rows (e.g. challenger_started, which carries only
+        // a label) render as plain rows without a chevron or button — a
+        // disclosure affordance that doesn't disclose anything is worse
+        // than no affordance.
+        const drillable  = !!fullText;
+        const showPanel  = drillable && open;
+        if (!drillable) {
+          return (
+            <li
+              key={r.key}
+              role="status"
+              data-testid={`thinking-row-${r.key}`}
+              className={`rounded-md border px-2 py-1 ${rowTone(r.state)}`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span aria-hidden="true" className="inline-block w-3" />
+                <span aria-hidden="true">{r.icon}</span>
+                <span className="font-medium">{r.label}</span>
+              </div>
+            </li>
+          );
+        }
         return (
           <li
             key={r.key}
@@ -62,7 +84,7 @@ export function DevinTimeline({ rows }: { rows: ThinkingRow[] }) {
             <button
               type="button"
               aria-expanded={open}
-              aria-controls={fullText ? panelId : undefined}
+              aria-controls={panelId}
               onClick={() => toggle(r.key)}
               data-testid={`thinking-row-toggle-${r.key}`}
               className="w-full text-left px-2 py-1 flex flex-col gap-0.5 focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded-md"

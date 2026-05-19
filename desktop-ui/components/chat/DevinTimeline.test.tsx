@@ -116,18 +116,32 @@ describe("DevinTimeline", () => {
     expect(screen.queryByTestId("thinking-row-panel-b")).toBeNull();
   });
 
-  it("omits aria-controls and the panel when the row carries no detail", () => {
+  it("renders non-drillable rows as plain non-button items (no chevron, no toggle)", () => {
+    // Rows like challenger_started carry only label/icon — no detail and no
+    // expandedDetail. They should not render a disclosure affordance.
     render(
       <DevinTimeline
-        rows={[row({ key: "a", label: "Bare label" })]}
+        rows={[row({ key: "a", label: "Reviewer checking step 2" })]}
+      />,
+    );
+    expect(screen.queryByTestId("thinking-row-toggle-a")).toBeNull();
+    expect(screen.getByTestId("thinking-row-a")).toBeTruthy();
+    // No chevron character should appear for non-drillable rows.
+    expect(screen.queryByText("▸")).toBeNull();
+    expect(screen.getByText("Reviewer checking step 2")).toBeTruthy();
+  });
+
+  it("a row with only short detail is still drillable (button + chevron + panel)", () => {
+    // Even when expandedDetail is absent, the line-clamp removal on expand
+    // is a meaningful disclosure — the panel preserves the toggle parity.
+    render(
+      <DevinTimeline
+        rows={[row({ key: "a", label: "Recalled", detail: "3 facts" })]}
       />,
     );
     const btn = screen.getByTestId("thinking-row-toggle-a");
-    expect(btn.getAttribute("aria-controls")).toBeNull();
-    fireEvent.click(btn);
-    // aria-expanded still toggles for keyboard parity, but no panel renders.
-    expect(btn.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.queryByTestId("thinking-row-panel-a")).toBeNull();
+    expect(btn.tagName).toBe("BUTTON");
+    expect(btn.getAttribute("aria-controls")).toBe("devin-row-panel-a");
   });
 
   it("applies state-specific palette classes", () => {
@@ -153,6 +167,24 @@ describe("DevinTimeline", () => {
     expect(
       screen.getByTestId("chat-stream-timeline-drillable").children,
     ).toHaveLength(0);
+  });
+
+  it("intermixes drillable and non-drillable rows preserving order", () => {
+    render(
+      <DevinTimeline
+        rows={[
+          row({ key: "a", label: "First",  detail: "with detail" }),
+          row({ key: "b", label: "Bare" }),
+          row({ key: "c", label: "Third",  expandedDetail: "deep" }),
+        ]}
+      />,
+    );
+    const items = screen.getAllByRole("status");
+    expect(items).toHaveLength(3);
+    // Two drillable buttons, one plain row in the middle.
+    expect(screen.getByTestId("thinking-row-toggle-a")).toBeTruthy();
+    expect(screen.queryByTestId("thinking-row-toggle-b")).toBeNull();
+    expect(screen.getByTestId("thinking-row-toggle-c")).toBeTruthy();
   });
 
   it("uses aria-controls to link the toggle button to its panel id", () => {
