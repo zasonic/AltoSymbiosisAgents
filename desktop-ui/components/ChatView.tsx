@@ -42,7 +42,7 @@ import {
   type PipelineLive,
   type PipelinePhase,
 } from "@/components/chat/derivePipelineLive";
-import { ThinkingTimeline } from "@/components/chat/ThinkingTimeline";
+import { Timeline, type TimelineVariant } from "@/components/chat/Timeline";
 import { useRoster } from "@/components/chat/useRoster";
 import {
   agentNameMap,
@@ -75,6 +75,7 @@ interface ChatRowData {
   items: ChatItem[];
   setRowHeight: (index: number, height: number) => void;
   voiceOutputEnabled: boolean;
+  timelineVariant: TimelineVariant;
 }
 
 // Live-pipeline and thinking-timeline reducers + their event shapes live in
@@ -130,6 +131,11 @@ export function ChatView() {
   const patchVoiceRecording = useAppStore((s) => s.patchVoiceRecording);
   const [voiceInputEnabled, setVoiceInputEnabled] = useState<boolean>(false);
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState<boolean>(false);
+  // Stage-2 #9: which render the streaming bubble uses for the per-turn
+  // thinking-timeline rows. Compact (the original one-liner list) until
+  // the user opts into drillable from Settings → Appearance.
+  const [timelineVariant, setTimelineVariant] =
+    useState<TimelineVariant>("compact");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<BlobPart[]>([]);
   const recordingStreamRef = useRef<MediaStream | null>(null);
@@ -249,6 +255,9 @@ export function ChatView() {
         if (!alive) return;
         setVoiceInputEnabled(!!s.voice_input_enabled);
         setVoiceOutputEnabled(!!s.voice_output_enabled);
+        setTimelineVariant(
+          s.timeline_variant === "drillable" ? "drillable" : "compact",
+        );
         if (!s.routing_enabled && s.claude_model) {
           const entry = catalog.models.find((m) => m.id === s.claude_model);
           setInputPricePerMtok(entry?.input_price_per_mtok ?? null);
@@ -271,6 +280,9 @@ export function ChatView() {
         .then(([s, catalog]) => {
           setVoiceInputEnabled(!!s.voice_input_enabled);
           setVoiceOutputEnabled(!!s.voice_output_enabled);
+          setTimelineVariant(
+            s.timeline_variant === "drillable" ? "drillable" : "compact",
+          );
           if (!s.routing_enabled && s.claude_model) {
             const entry = catalog.models.find((m) => m.id === s.claude_model);
             setInputPricePerMtok(entry?.input_price_per_mtok ?? null);
@@ -1018,8 +1030,8 @@ export function ChatView() {
   }, [items.length, streamingBuffer]);
 
   const rowData = useMemo<ChatRowData>(
-    () => ({ items, setRowHeight, voiceOutputEnabled }),
-    [items, setRowHeight, voiceOutputEnabled],
+    () => ({ items, setRowHeight, voiceOutputEnabled, timelineVariant }),
+    [items, setRowHeight, voiceOutputEnabled, timelineVariant],
   );
 
   // Track the message-list area's pixel size so VariableSizeList can size
@@ -1802,7 +1814,7 @@ function ChatListRow({ index, style, data }: ListChildComponentProps<ChatRowData
               />
             )}
             {item.timeline.length > 0 && (
-              <ThinkingTimeline rows={item.timeline} />
+              <Timeline rows={item.timeline} variant={data.timelineVariant} />
             )}
             {item.buffer ? (
               <>

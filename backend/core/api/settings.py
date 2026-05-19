@@ -64,6 +64,8 @@ class SettingsAPI(BaseAPI):
             "voice_output_enabled":       bool(self._settings.get("voice_output_enabled")),
             "stt_model_id":               self._settings.get("stt_model_id") or "",
             "tts_voice_id":               self._settings.get("tts_voice_id") or "",
+            # Stage-2 #9: which Thinking-timeline render the chat bubble uses.
+            "timeline_variant":           str(self._settings.get("timeline_variant") or "compact"),
         }
 
     def save_setting(self, key: str, value: Any) -> None:

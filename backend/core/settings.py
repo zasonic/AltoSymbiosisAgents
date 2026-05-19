@@ -220,6 +220,17 @@ SETTINGS_DEFAULTS: dict[str, tuple] = {
     # Reader proposed. Default False so existing behavior is preserved.
     "reader_actor_split_enabled":    (bool,  False),
 
+    # Stage-2 #9: drillable Devin-style timeline variant. Picks which render
+    # of the per-turn ThinkingRow[] timeline the chat bubble uses:
+    #   "compact"   — the original ThinkingTimeline (one row per event, no
+    #                 affordances, detail line-clamped to 2 lines).
+    #   "drillable" — DevinTimeline: same rows but each row is a button
+    #                 that toggles a panel with the un-truncated narrative.
+    # Default "compact" so an upgrade doesn't surprise existing users; the
+    # drillable variant is opt-in via the Appearance settings group until
+    # we collect real-world feedback.
+    "timeline_variant":              (str,   "compact"),
+
     # Stage-2 #7: LangGraph 1.2 StateGraph engine. Selects the control-flow
     # implementation for ChatOrchestrator.send():
     #   "legacy" — the imperative 800+-line body that has shipped since v5.
@@ -727,6 +738,16 @@ FIELD_METADATA: dict[str, dict] = {
             {"value": "agents",   "label": "Agents"},
             {"value": "mcp",      "label": "Tool servers"},
             {"value": "settings", "label": "Settings"},
+        ],
+    },
+    "timeline_variant": {
+        "label":       "Thinking timeline style",
+        "description": "Compact one-liner rows (default), or drillable rows you can expand to read the full reasoning (experimental).",
+        "type":        "enum",
+        "group":       "appearance",
+        "options": [
+            {"value": "compact",   "label": "Compact"},
+            {"value": "drillable", "label": "Drillable (experimental)"},
         ],
     },
 
