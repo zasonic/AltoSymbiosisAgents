@@ -47,12 +47,14 @@ function baseUrl(info: SidecarInfo): string {
 
 /**
  * Discriminated union of typed errors returned by the FastAPI sidecar
- * (Stage-2 #11). The renderer can `switch (err.error_type)` to branch
- * on the typed cases. Routes that still raise raw HTTPException are
- * normalised by the backend handler to `error_type: "http_error"` so
- * the response shape is identical regardless of source.
+ * (Stage-2 #11). Module-private until a caller actually narrows on it;
+ * external callers read the value through `ApiError.errorType` (TypeScript
+ * propagates the literal type via the public `ApiError` interface). Routes
+ * that still raise raw HTTPException are normalised by the backend handler
+ * to `error_type: "http_error"` so the response shape stays identical
+ * regardless of source.
  */
-export type ErrorType =
+type ErrorType =
   | "conversation_not_found"
   | "attachment_not_found"
   | "attachment_invalid"
@@ -65,7 +67,7 @@ export type ErrorType =
   | "internal_error"
   | "http_error";
 
-export interface ErrorEnvelope {
+interface ErrorEnvelope {
   error_type: ErrorType;
   status_code: number;
   message: string;
