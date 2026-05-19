@@ -1,5 +1,200 @@
 # Handoff
 
+**Latest on `main`:** `efa4c85` (Merge PR #25 — Stage-2 #9 settings toggle)
+**Open branches (this session):**
+- `feat/visual-team-composer` — Stage-2 #10 (pushed, PR pending).
+- `feat/typed-error-envelopes` — Stage-2 #11 (pushed, PR pending).
+- `feat/engine-bootstrap-check` — Stage-2 #12 (this branch, pushed).
+**Status:** All three remaining Stage-2 items shipped on separate branches.
+**Date:** 2026-05-19
+
+## What shipped this session — three Stage-2 closing items
+
+### Stage-2 #10 — Visual TeamComposer (`feat/visual-team-composer`)
+
+Render-layer rewrite of `desktop-ui/components/RosterPicker.tsx`
+against the multi-agent UX direction. Props unchanged
+(`agentId` / `teamId` / `onApply` / `disabled`) so the ChatView call
+site is untouched.
+
+- **`desktop-ui/components/RosterPicker.tsx`.** Agent list converted
+  from a vertical checkbox column to a 2-column chip-card grid (each
+  card carries initials avatar, name, role pill or Coordinator badge,
+  2-line description clamp). Auto-coordinator surfacing when 2+
+  agents are drafted: agent with `role === "coordinator"` wins, else
+  the first by registry order. For saved-team picks the chip uses
+  the team's stored `coordinator_id`. Mirrors backend
+  `agent_registry.py:840`. Migrated off local `useState` + `useEffect`
+  fetches onto the shared `useAgents()` / `useTeams()` hooks from
+  `chat/queries.ts` so the TanStack cache is shared with ChatView
+  (closes the RosterPicker half of the #8 hook-adoption follow-up).
+- **`desktop-ui/components/RosterPicker.test.tsx`** (new, 18 tests).
+  Pill labelling, sidecar-gated disable, chip-card render +
+  selection + search, coordinator auto-pick (role wins, fallback to
+  registry order, no badge for solo), saved-team chips (render +
+  ad-hoc hiding + member hydration + stored-coordinator badge),
+  apply paths (solo, ad-hoc multi, teamId-routed, unbind-to-empty).
+
+### Stage-2 #11 — Typed error envelopes (`feat/typed-error-envelopes`)
+
+Converts the sidecar's exception-to-JSON path from
+`HTTPException(detail="...")` strings into a discriminated-union
+envelope the renderer can pattern-match:
+
+    {
+      "error_type":   "conversation_not_found",
+      "status_code":  404,
+      "message":      "Conversation not found",
+      "hint":         "id=c-99"
+    }
+
+- **`backend/core/errors.py`** (new). `DomainError` exception class
+  with classmethod constructors for the typed catalog
+  (conversation_not_found, attachment_not_found, attachment_invalid,
+  attachment_save_failed, prompt_template_not_found,
+  invalid_search_query, voice_invalid_input, voice_engine_unavailable,
+  rag_unavailable, internal_error). `http_exception_to_envelope`
+  wraps unmigrated raises into the same shape with
+  `error_type="http_error"`. `install_error_handlers(app)` registers
+  both `@app.exception_handler` decorators so test fixtures that
+  mount a single router on a minimal FastAPI app observe the same
+  JSON the renderer sees.
+- **`backend/server.py`**. `build_app` calls
+  `install_error_handlers(app)` after middleware setup.
+- **`backend/routes/{chat,conversations,attachments,voice,prompt_templates}.py`**.
+  All 23 `HTTPException(...)` raise sites migrated to the matching
+  `DomainError.<variant>()` call. Status codes unchanged; the
+  `HTTPException` import is dropped from each module.
+- **`desktop-ui/api/client.ts`**. New `ErrorType` union +
+  `ErrorEnvelope` interface mirroring the backend catalog. `ApiError`
+  picks up `errorType` and `hint` fields, populated from the envelope
+  when present. `request()` and `postMultipart()` share a
+  `makeApiError()` helper that prefers envelope.message, falls back
+  to legacy `{detail}` / `{error}` (BearerAuthMiddleware short-circuits
+  before the handlers, so its `{error: "unauthorized"}` body still
+  works).
+- **Tests.** `backend/tests/test_error_envelopes.py` (new, 17 tests)
+  pins each constructor + the http_exception wrapper + an end-to-end
+  FastAPI app exercising both handlers. Six mini-app fixtures
+  (`test_{attachments,chat_vision,conversation_export,conversation_search,prompts,voice_routes}.py`)
+  now call `install_error_handlers(a)`; a handful of body-shape
+  assertions updated from `body["detail"]` to `body["message"]` +
+  `body["error_type"]`.
+
+### Stage-2 #12 — Engine binary check (`feat/engine-bootstrap-check`)
+
+Resolves the TODO(engines) at
+`desktop-shell/bootstrap/bin_manager.ts:44`. Lets the wizard +
+renderer detect whether the bundled llama.cpp binary is installed
+without having to spawn the child and parse a BundledServerError.
+
+- **`desktop-shell/bootstrap/bin_manager.ts`**. New exports:
+  `getEngineBinaryCandidates()` (three candidate paths in priority
+  order: `<binRoot>/engines/<name>` for the future engine-download
+  wizard, `<resources>/backend/llama-server/<name>` for installer
+  builds, `branding/sidecar-bundle/llama-server/<name>` for source
+  checkouts — mirrors the Python fallback at
+  `backend/core/paths.py:324`), `resolveEngineBinary()` (first
+  existing or null), `hasEngineBinary()` (bool). `isBootstrapped()`
+  deliberately does NOT gate on the engine binary because bundled
+  mode is opt-in — Claude API / Ollama / LM Studio users never need
+  it. A header comment documents the policy.
+- **`backend/services/bundled_server.py`**. New `binary_available()`
+  method on BundledServer; same path as `start()` resolves, swallows
+  OSError into False.
+- **`backend/routes/system.py`**. `/api/system/bundled/status` now
+  carries `binary_available: bool`. The `bundled_server is None`
+  branch falls through to False on both `available` and
+  `binary_available` so the renderer never has to special-case the
+  service-not-wired state.
+- **Tests.** `desktop-shell/bootstrap/__tests__/bin_manager.test.ts`
+  (new, 5 tests). `backend/tests/test_bundled_server.py` (+3 tests
+  for `binary_available()`). `backend/tests/test_system_routes.py`
+  (+1 test for the missing-binary branch, modified 2).
+
+## Verified across all three branches
+
+- **`feat/engine-bootstrap-check` (this branch).**
+  - `cd backend && python -m pytest tests/ -q` — **728 passed**, 9
+    skipped, 13 deselected (was 724 on main; +3 binary_available +
+    1 bundled_status).
+  - `npm run test:frontend` — **173 passed** across 19 files (was 168
+    on main; +5 from `bin_manager.test.ts`).
+  - `npm run typecheck` + `npm run build` — clean.
+- **`feat/typed-error-envelopes`.** 742 backend, 168 frontend.
+- **`feat/visual-team-composer`.** 720 backend (unchanged from main
+  on that branch), 186 frontend (+18 from `RosterPicker.test.tsx`).
+
+## Stage-2 status
+
+- **#7 LangGraph 1.2 StateGraph orchestrator** — landed (PR #17).
+  Default still `"legacy"`; flip gated on bench cycles.
+- **#8 ChatView decomposition** — done. RosterPicker's hook adoption
+  (#10) closes one of the follow-ups. AgentPanel still owns its own
+  `useState` + `useEffect` and would be a similar ~30-LOC swap.
+- **#9 Devin-style timeline** — done end-to-end (PRs #24 + #25).
+- **#10 Visual TeamComposer** — **landed (`feat/visual-team-composer`).**
+- **#11 Typed error envelopes** — **landed (`feat/typed-error-envelopes`).**
+- **#12 Bundled llama-server binary** — **landed (`feat/engine-bootstrap-check`).**
+
+Stage 2 is complete pending PR merges for the three branches above.
+
+## Next up
+
+1. **Merge the three open PRs.** Order is not load-bearing — they
+   branched off main concurrently and touch disjoint files.
+2. **#8 hook-adoption follow-up.** Migrate `AgentPanel.tsx` off its
+   own `useState` + `useEffect` fetches onto `useAgents()` /
+   `useTeams()` from `chat/queries.ts` (RosterPicker just did it).
+3. **#7 follow-up.** Weekly AgentDojo + agentic-misalignment bench
+   cycles under `orchestrator_engine="graph"`; two consecutive clean
+   runs gate the default flip away from `"legacy"`.
+4. **#11 follow-up.** Renderer-side adoption: ChatView's roster
+   apply path currently catches errors as `Error`. With the new
+   `errorType` field on `ApiError`, the rollback-toast text can be
+   tailored per discriminator (e.g. "team has no members" → "Pick
+   at least one agent" instead of a generic backend message).
+5. **#12 follow-up.** Engine-download wizard — when a user opts into
+   bundled mode but `binary_available` is False, the renderer should
+   surface a one-click download flow that drops the binary at
+   `<binRoot>/engines/<name>` (the first candidate in
+   `getEngineBinaryCandidates()`). Python's `bundled_server_binary()`
+   doesn't currently look at that path; the wizard PR will need to
+   extend it.
+
+## Walls hit
+
+**Test-shape regressions from #11.** Mini-app fixtures across six
+test files were building FastAPI apps without the exception handlers,
+so the DomainError raises in the migrated routes bubbled up
+uncaught instead of becoming a 4xx JSON response. Resolved by
+extracting `install_error_handlers(app)` from server.py into the
+core errors module so fixtures could call it too. Worth remembering
+for any future cross-cutting middleware additions.
+
+**`PROJECT_ROOT` is module-load-time in `bin_manager.ts`.** It's
+computed from `import.meta.url`, so mocking `app.getAppPath()` in
+tests doesn't actually re-route the dev-mode path. The
+`bin_manager.test.ts` works around this by running all engine-binary
+tests in `app.isPackaged = true` mode with a stubbed
+`process.resourcesPath`, so `getResourceDir()` reads the mock
+instead of the real repo root.
+
+**No jest-dom in this repo.** First pass at
+`RosterPicker.test.tsx` used `toHaveTextContent` / `toHaveAttribute`
+/ `toBeInTheDocument` / `toBeDisabled` and failed with "Invalid Chai
+property". Rewritten with raw DOM assertions
+(`el.textContent.includes(...)`,
+`el.getAttribute("aria-checked") === "true"`,
+`(el as HTMLButtonElement).disabled === true`). Pinned for future
+component tests in this repo.
+
+---
+
+<!-- Earlier handoff content preserved below for cross-session reference. -->
+
+# Earlier session — `feat/timeline-variant-toggle` (merged via PR #25)
+
 **Latest on `main`:** `3fca374` (Merge PR #24 — DevinTimeline drillable variant)
 **Branch:** `feat/timeline-variant-toggle` · **Pushed:** pending
 **Status:** Stage-2 #9 wired behind a `timeline_variant` setting (Appearance group).
