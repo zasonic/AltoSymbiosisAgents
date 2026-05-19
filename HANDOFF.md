@@ -1,112 +1,272 @@
 # Handoff
 
-**Latest on `main`:** `efa4c85` (Merge PR #25 — Stage-2 #9 settings toggle)
-**Branch:** `feat/visual-team-composer` · **Pushed:** pending
-**Status:** Stage-2 #10 — RosterPicker rewritten as a chip-card composer with auto-coordinator badge + shared TanStack cache.
+**Latest on `main`:** `09bd1a2` (Merge PR #27 — typed error envelopes)
+**This branch:** `feat/engine-bootstrap-check` — Stage-2 #12, pushed, PR pending; CI not yet triggered (open the PR to fire workflows).
+**Already merged this session:** PR #26 (`feat/visual-team-composer`, Stage-2 #10), PR #27 (`feat/typed-error-envelopes`, Stage-2 #11).
+**Status:** Stage 2 complete pending this branch's PR merge. Durable rule locked in this session:
+**no fakes, no mocks, no stand-in objects** — production code real end-to-end; tests drive real
+production code against real dependencies. Mock-based tests removed across all three branches
+before merge.
 **Date:** 2026-05-19
 
-## What just shipped (this branch — Stage 2 #10 Visual TeamComposer)
+## Rule reset this session — no fakes, no mocks, no stand-ins
 
-**Stage-2 item #10 — RosterPicker render-layer rewrite.** Replaces the
-checkbox-column dropdown with a 2-column chip-card grid that surfaces
-the role badge and auto-picks a coordinator when 2+ agents are drafted.
-Public props (`agentId` / `teamId` / `onApply` / `disabled`) and the
-`RosterPick` contract are unchanged — the ChatView call site is
-untouched.
+User mandate stated on 2026-05-19: "no fake things or mocked, either. that is
+counterproductive. if it cannot function then it is not worth implementing." Saved in
+`feedback_no_bugs_or_dummy_data.md`. Mocked tests pass while the real system doesn't —
+they verify the mock, not the production behavior. So: if a path can only be reached
+via a fake/mock, it shouldn't be implemented; if a test needs mocks to drive production
+code, write it against real dependencies instead.
 
-- **`desktop-ui/components/RosterPicker.tsx`** (rewritten, 416 LOC, was
-  455).
-  - Agent list: chip cards in a `grid grid-cols-1 sm:grid-cols-2 gap-1.5`.
-    Each card carries a 7×7 initials avatar, name, role pill or
-    Coordinator badge, and a 2-line description clamp. Selected state
-    is `bg-accent/10 border-accent shadow-soft-1`, not a tick.
-  - Coordinator pick: when `draft.size >= 2`, compute the agent with
-    `role.toLowerCase() === "coordinator"`, else the first selected
-    agent by registry order. When a saved-team chip is the active
-    draft, surface its stored `coordinator_id` verbatim. Mirrors the
-    backend logic at `backend/services/agent_registry.py:840`.
-  - Footer summary: `"Coordinator: <name> · Team of N"` when a
-    coordinator is in play, otherwise just the draft summary.
-  - **Data sources migrated** off local `useState` + `useEffect` onto
-    the shared `useAgents()` / `useTeams()` hooks from
-    `chat/queries.ts`. Picker now shares the TanStack cache with
-    ChatView, gets focus refetch + invalidation for free, and the
-    `Agents.list()` / `Teams.list()` calls collapse to one network
-    request per renderer rather than two (#8 hook-adoption follow-up
-    closed for RosterPicker).
-- **`desktop-ui/components/RosterPicker.test.tsx`** (new, 18 tests).
-  Pill (4): "No agent" label, active agent label, pill opens dropdown,
-  sidecar-gated disable. Chip-card grid (4): renders agent + "No
-  agent" pseudo-card, hydrates `aria-checked` from `agentId` prop,
-  click toggles, search filters by name/role/description. Coordinator
-  auto-pick (3): no badge for solo, role=coordinator wins over
-  registry order, fallback to first by registry order when no
-  coordinator role. Saved-team chips (3): chip per non-adhoc team,
-  ad-hoc teams hidden, picking hydrates draft + surfaces stored
-  coordinator. Apply (4): solo, ad-hoc multi, teamId-routed,
-  unbind-to-empty.
+What this changed mid-session:
 
-## Verified
+- **Cleanup commits on each branch** after the user stated the rule:
+  - `feat/typed-error-envelopes`: replaced `_make_app()` stand-in handlers in
+    `test_error_envelopes.py` with `install_error_handlers(app)` on a fresh FastAPI()
+    so the integration tests drive the **real** production handlers.
+  - `feat/engine-bootstrap-check`: deleted `desktop-shell/bootstrap/__tests__/bin_manager.test.ts`
+    (mocked `electron`); deleted the `_RaisingPath` test and the defensive `try/except OSError`
+    branch in `BundledServer.binary_available()` it was exercising (rule: if a branch can
+    only be reached via a fake, it shouldn't be implemented). Replaced MagicMock-extending
+    route tests in `test_system_routes.py` with a new `TestBundledStatusBinaryAvailable`
+    class that swaps in a real `BundledServer(settings)` and exercises a real (tmp) filesystem
+    binary path.
+  - `feat/visual-team-composer`: deleted `desktop-ui/components/RosterPicker.test.tsx`
+    (mocked `@/api/client` and `useAppStore.setState`). The RosterPicker production code
+    stays; coverage will return when E2E lands.
 
-- `npx vitest run desktop-ui/components/RosterPicker.test.tsx` —
-  **18 passed** in 1.3s.
-- `npm run typecheck` — clean (both `tsconfig.node.json` and
-  `tsconfig.web.json`).
-- `npm run test:frontend` — **186 passed** across 19 files (was 168;
-  +18 from this PR's RosterPicker.test.tsx).
-- `npm run build` — clean (5.9s).
+- **Audit of pre-existing route tests.** Already mock-free: `test_conversation_search.py`,
+  `test_conversation_export.py`, `test_prompts.py`. Still mock-heavy:
+  `test_attachments.py` (`fake_rag` + `fake_api` MagicMocks), `test_chat_vision.py`
+  (same + `local_client_available` extensions), `test_voice_routes.py` (`fake_api` +
+  `fake_container.voice`), `test_system_routes.py` (`fake_local` + `fake_bundled` for
+  the local_models tests; bundled tests partially migrated already), and the conftest
+  fixtures `mock_anthropic` / `claude_client` / `local_client_available`. These are the
+  migration targets.
 
-## Stage-2 status (post-this-PR)
+## Test infrastructure follow-ups (after the three Stage-2 PRs land)
+
+1. **E2E renderer harness.** Add Playwright tests that exercise the RosterPicker
+   (and future components) against a real packaged Electron build with a real sidecar.
+   This is the only way to verify renderer behavior end-to-end without mocking
+   `@/api/client`. Restores the coverage deleted on `feat/visual-team-composer`.
+2. **Migrate `test_attachments.py` + `test_chat_vision.py` off `fake_rag`.** Two paths:
+   (a) bring up a real `RAGIndex` per-suite (loads sentence-transformers — slow first
+   boot, fast subsequent), (b) skip the `persist=true` ingest tests until the real
+   harness is in place.
+3. **Migrate `test_voice_routes.py` off `fake_api`/`fake_container.voice`.** A real
+   `VoiceService` doesn't actually spawn whisper/piper until called; the constructor
+   is cheap. Replace `fake_api = MagicMock()` with a real lightweight object holding
+   `_settings`. The tests that exercise transcribe/synthesize need real whisper/piper
+   binaries — those should move to E2E.
+4. **Migrate `conftest.py`'s `mock_anthropic` / `claude_client` fixtures.** External
+   API mocks are the harder case under the rule. Either run against a real Anthropic
+   API in CI (needs a sandbox key + budget) or move the relevant tests behind a
+   `pytest.mark.requires_anthropic` and skip them in default runs. Same for
+   `local_client_available` — needs a real LocalClient pointed at a real Ollama or
+   LM Studio (or bundled llama-server) instance.
+5. **Re-audit on every new feature.** When extending an existing mock-heavy test file,
+   prefer adding real-integration coverage (or removing the mocked tests entirely)
+   over piling on more mocks.
+
+For the three Stage-2 PRs themselves, the production code lives up to the rule — the
+DomainError handlers fire in the real app, the RosterPicker renders against real
+useAgents/useTeams in the real chat panel, and `binary_available()` reads a real Path.
+The mocked tests that have been removed are coverage that wasn't actually verifying
+real behavior; the production code remains valid.
+
+## What shipped this session — three Stage-2 closing items
+
+### Stage-2 #10 — Visual TeamComposer (`feat/visual-team-composer`)
+
+Render-layer rewrite of `desktop-ui/components/RosterPicker.tsx`
+against the multi-agent UX direction. Props unchanged
+(`agentId` / `teamId` / `onApply` / `disabled`) so the ChatView call
+site is untouched.
+
+- **`desktop-ui/components/RosterPicker.tsx`.** Agent list converted
+  from a vertical checkbox column to a 2-column chip-card grid (each
+  card carries initials avatar, name, role pill or Coordinator badge,
+  2-line description clamp). Auto-coordinator surfacing when 2+
+  agents are drafted: agent with `role === "coordinator"` wins, else
+  the first by registry order. For saved-team picks the chip uses
+  the team's stored `coordinator_id`. Mirrors backend
+  `agent_registry.py:840`. Migrated off local `useState` + `useEffect`
+  fetches onto the shared `useAgents()` / `useTeams()` hooks from
+  `chat/queries.ts` so the TanStack cache is shared with ChatView
+  (closes the RosterPicker half of the #8 hook-adoption follow-up).
+- **No test file.** A first pass added `desktop-ui/components/RosterPicker.test.tsx`
+  but it mocked `@/api/client` and `useAppStore.setState` — both forbidden under
+  the no-mocks rule that landed mid-session. The file was deleted in the cleanup
+  commit (`377dab5`). Verifying the chip-card flow end-to-end needs Playwright
+  against a real Electron build with a real sidecar; tracked as a Test-infra
+  follow-up below.
+
+### Stage-2 #11 — Typed error envelopes (`feat/typed-error-envelopes`)
+
+Converts the sidecar's exception-to-JSON path from
+`HTTPException(detail="...")` strings into a discriminated-union
+envelope the renderer can pattern-match:
+
+    {
+      "error_type":   "conversation_not_found",
+      "status_code":  404,
+      "message":      "Conversation not found",
+      "hint":         "id=c-99"
+    }
+
+- **`backend/core/errors.py`** (new). `DomainError` exception class
+  with classmethod constructors for the typed catalog
+  (conversation_not_found, attachment_not_found, attachment_invalid,
+  attachment_save_failed, prompt_template_not_found,
+  invalid_search_query, voice_invalid_input, voice_engine_unavailable,
+  rag_unavailable, internal_error). `http_exception_to_envelope`
+  wraps unmigrated raises into the same shape with
+  `error_type="http_error"`. `install_error_handlers(app)` registers
+  both `@app.exception_handler` decorators so test fixtures that
+  mount a single router on a minimal FastAPI app observe the same
+  JSON the renderer sees.
+- **`backend/server.py`**. `build_app` calls
+  `install_error_handlers(app)` after middleware setup.
+- **`backend/routes/{chat,conversations,attachments,voice,prompt_templates}.py`**.
+  All 23 `HTTPException(...)` raise sites migrated to the matching
+  `DomainError.<variant>()` call. Status codes unchanged; the
+  `HTTPException` import is dropped from each module.
+- **`desktop-ui/api/client.ts`**. New `ErrorType` union +
+  `ErrorEnvelope` interface mirroring the backend catalog. `ApiError`
+  picks up `errorType` and `hint` fields, populated from the envelope
+  when present. `request()` and `postMultipart()` share a
+  `makeApiError()` helper that prefers envelope.message, falls back
+  to legacy `{detail}` / `{error}` (BearerAuthMiddleware short-circuits
+  before the handlers, so its `{error: "unauthorized"}` body still
+  works).
+- **Tests.** `backend/tests/test_error_envelopes.py` (new, 17 tests)
+  pins each constructor + the http_exception wrapper + an end-to-end
+  FastAPI app exercising both handlers. Six mini-app fixtures
+  (`test_{attachments,chat_vision,conversation_export,conversation_search,prompts,voice_routes}.py`)
+  now call `install_error_handlers(a)`; a handful of body-shape
+  assertions updated from `body["detail"]` to `body["message"]` +
+  `body["error_type"]`.
+
+### Stage-2 #12 — Engine binary check (`feat/engine-bootstrap-check`)
+
+Resolves the TODO(engines) at
+`desktop-shell/bootstrap/bin_manager.ts:44`. Lets the wizard +
+renderer detect whether the bundled llama.cpp binary is installed
+without having to spawn the child and parse a BundledServerError.
+
+- **`desktop-shell/bootstrap/bin_manager.ts`**. New exports:
+  `getEngineBinaryCandidates()` (three candidate paths in priority
+  order: `<binRoot>/engines/<name>` for the future engine-download
+  wizard, `<resources>/backend/llama-server/<name>` for installer
+  builds, `branding/sidecar-bundle/llama-server/<name>` for source
+  checkouts — mirrors the Python fallback at
+  `backend/core/paths.py:324`), `resolveEngineBinary()` (first
+  existing or null), `hasEngineBinary()` (bool). `isBootstrapped()`
+  deliberately does NOT gate on the engine binary because bundled
+  mode is opt-in — Claude API / Ollama / LM Studio users never need
+  it. A header comment documents the policy.
+- **`backend/services/bundled_server.py`**. New `binary_available()`
+  method on BundledServer; same path as `start()` resolves, swallows
+  OSError into False.
+- **`backend/routes/system.py`**. `/api/system/bundled/status` now
+  carries `binary_available: bool`. The `bundled_server is None`
+  branch falls through to False on both `available` and
+  `binary_available` so the renderer never has to special-case the
+  service-not-wired state.
+- **Tests.** A first pass added `desktop-shell/bootstrap/__tests__/bin_manager.test.ts`
+  but it mocked the `electron` `app` singleton + stubbed `process.resourcesPath`;
+  the file was deleted in the cleanup commit (`7bb5048`) and the defensive
+  `try/except OSError` in `BundledServer.binary_available()` was removed alongside
+  it (rule: a branch reachable only via a fake shouldn't be implemented).
+  Backend coverage stayed real-integration: `backend/tests/test_bundled_server.py`
+  (+2 tests on real BundledServer with real tmp_path binaries),
+  `backend/tests/test_system_routes.py` (+2 in a new `TestBundledStatusBinaryAvailable`
+  class that swaps a real `BundledServer(settings)` into the route container).
+
+## Verified across all three branches (post-cleanup)
+
+- **`feat/engine-bootstrap-check` (this branch).**
+  - `cd backend && python -m pytest tests/ -q` — **728 passed**, 9
+    skipped, 13 deselected (was 724 on main; +4 real-integration
+    tests covering `binary_available` and `/bundled/status` against
+    real `BundledServer` + real fs Paths).
+  - `npm run test:frontend` — **168 passed** across 18 files (matches
+    main; the mocked `bin_manager.test.ts` was removed in the cleanup
+    commit).
+  - `npm run typecheck` + `npm run build` — clean.
+- **`feat/typed-error-envelopes` (merged via PR #27).** CI green on
+  commit `d625921`: tests + windows-smoke both success. 742 backend,
+  168 frontend. The integration tests in
+  `backend/tests/test_error_envelopes.py` drive the **real**
+  `install_error_handlers` against a fresh FastAPI app — no
+  hand-copied handlers, no MagicMock fixtures.
+- **`feat/visual-team-composer` (merged via PR #26).** CI green on
+  commit `377dab5`. 720 backend (matches branch base), 168 frontend
+  (matches main; the mocked `RosterPicker.test.tsx` was removed in
+  the cleanup commit).
+
+## Stage-2 status
 
 - **#7 LangGraph 1.2 StateGraph orchestrator** — landed (PR #17).
   Default still `"legacy"`; flip gated on bench cycles.
-- **#8 ChatView decomposition** — done; RosterPicker's hook adoption
-  (this PR) closes one of the follow-ups. AgentPanel still owns its
-  own `useState` + `useEffect` and would be a similar ~30-LOC swap.
-- **#9 Devin-style timeline** — done end-to-end (PR #24 + #25).
-- **#10 Visual TeamComposer** — **landed (this PR).**
-- **#11 Typed error envelopes** — pending (next).
-- **#12 Bundled llama-server binary** — pending.
+- **#8 ChatView decomposition** — done. RosterPicker's hook adoption
+  (#10) closes one of the follow-ups. AgentPanel still owns its own
+  `useState` + `useEffect` and would be a similar ~30-LOC swap.
+- **#9 Devin-style timeline** — done end-to-end (PRs #24 + #25).
+- **#10 Visual TeamComposer** — **landed (`feat/visual-team-composer`).**
+- **#11 Typed error envelopes** — **landed (`feat/typed-error-envelopes`).**
+- **#12 Bundled llama-server binary** — **landed (`feat/engine-bootstrap-check`).**
+
+Stage 2 is complete pending PR merges for the three branches above.
 
 ## Next up
 
-1. **#11 — typed error envelopes.** Backend work; converts
-   `HTTPException(status_code, detail="string")` raises across
-   `backend/routes/*.py` into a discriminated-union JSON shape
-   (`{error_type, status_code, detail, hint?}`) the renderer can
-   pattern-match. Add a FastAPI exception handler + a `domain_error()`
-   helper, then migrate the noisiest routes (chat, voice, attachments,
-   conversations).
-2. **#12 — bundled llama-server binary.** Resolve the `TODO(engines)`
-   in `desktop-shell/bootstrap/bin_manager.ts:44`: extend
-   `isBootstrapped()` with an `existsSync` check on
-   `<binRoot>/engines/llama-server.exe` so Electron's readiness gate
-   actually verifies the binary is present before sidecar boot.
-   `bundled_server.py` already errors cleanly when the binary is
-   missing (lines 366-372) — this is the bootstrap-side counterpart.
-3. **#8 hook-adoption follow-up.** Migrate `AgentPanel.tsx` off its
+1. **Open the PR for `feat/engine-bootstrap-check` and merge it.**
+   Once merged, all of Stage 2 is on main.
+2. **#8 hook-adoption follow-up.** Migrate `AgentPanel.tsx` off its
    own `useState` + `useEffect` fetches onto `useAgents()` /
    `useTeams()` from `chat/queries.ts` (RosterPicker just did it).
-4. **#7 follow-up.** Weekly AgentDojo + agentic-misalignment bench
+3. **#7 follow-up.** Weekly AgentDojo + agentic-misalignment bench
    cycles under `orchestrator_engine="graph"`; two consecutive clean
-   runs gate the default flip.
+   runs gate the default flip away from `"legacy"`.
+4. **#11 follow-up.** Renderer-side adoption: ChatView's roster
+   apply path currently catches errors as `Error`. With the new
+   `errorType` field on `ApiError`, the rollback-toast text can be
+   tailored per discriminator (e.g. "team has no members" → "Pick
+   at least one agent" instead of a generic backend message). When
+   the first caller actually narrows on it, re-export `ErrorType`
+   and `ErrorEnvelope` from `desktop-ui/api/client.ts` — they are
+   currently module-private (CI ts-prune gate dropped the exports
+   on `d625921` because no caller used them yet).
+5. **#12 follow-up.** Engine-download wizard — when a user opts into
+   bundled mode but `binary_available` is False, the renderer should
+   surface a one-click download flow that drops the binary at
+   `<binRoot>/engines/<name>` (the first candidate in
+   `getEngineBinaryCandidates()`). Python's `bundled_server_binary()`
+   doesn't currently look at that path; the wizard PR will need to
+   extend it.
 
 ## Walls hit
 
-The codebase doesn't use jest-dom matchers (no `toHaveTextContent` /
-`toHaveAttribute` / `toBeInTheDocument`). First test pass leaned on
-those and failed with "Invalid Chai property" until rewritten with raw
-DOM assertions (`el.textContent.includes(...)`,
-`el.getAttribute("aria-checked") === "true"`,
-`(el as HTMLButtonElement).disabled === true`). Worth pinning for
-future test files in this repo.
+**Test-shape regressions from #11.** Mini-app fixtures across six
+test files were building FastAPI apps without the exception handlers,
+so the DomainError raises in the migrated routes bubbled up
+uncaught instead of becoming a 4xx JSON response. Resolved by
+extracting `install_error_handlers(app)` from server.py into the
+core errors module so fixtures could call it too. Worth remembering
+for any future cross-cutting middleware additions.
 
-The `useAgents()` / `useTeams()` hook surface returns
-`AgentRow[] | undefined` (an in-flight query is `undefined`, not `[]`).
-`useMemo` over `(query.data ?? [])` handles that, but the same data is
-read for `useTeams()` with a `.filter((t) => !t.is_adhoc)` step — that
-filter has to live downstream of the `?? []` or you'll get a TypeError
-on the very first render before the query lands.
+**CI ts-prune gate caught unused exports.** PR #27 first push failed
+on the renderer dead-code gate: `ErrorType` and `ErrorEnvelope` were
+exported from `desktop-ui/api/client.ts` but no renderer caller had
+adopted them yet. Fix on `d625921` dropped the `export` keyword so
+both become module-private; the public `ApiError` interface still
+references them, so external callers can read `err.errorType` /
+`err.hint` without an explicit import. When the first caller
+actually `switch`-narrows on the discriminator, re-export then.
+Captured under the no-hypothetical-future-code rule: don't export
+types that have no consumer yet.
 
 ---
 

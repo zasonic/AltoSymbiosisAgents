@@ -348,6 +348,17 @@ class BundledServer:
         with self._lock:
             return self._model_id
 
+    def binary_available(self) -> bool:
+        """Whether the llama-server binary is present on disk.
+
+        Stage-2 #12. Lets the renderer / wizard distinguish "not started yet"
+        from "binary not installed" without trying to ``start()`` and parsing
+        the resulting BundledServerError message. The path is the same one
+        ``start()`` will resolve, so this stays in lockstep with the runtime
+        check at routes/system.py: /api/system/bundled/status surfaces it.
+        """
+        return paths.bundled_server_binary().exists()
+
     def start(self, model_path: str, *, model_id: str | None = None) -> int:
         """Spawn llama-server bound to a random localhost port.
 

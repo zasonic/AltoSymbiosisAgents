@@ -298,3 +298,27 @@ class TestLifecycle:
                             lambda: binary)
         with pytest.raises(BundledServerError, match="model file missing"):
             server.start(str(tmp_path / "no-such.gguf"))
+
+
+# ── binary_available() (Stage-2 #12) ─────────────────────────────────────────
+
+
+class TestBinaryAvailable:
+    def test_returns_true_when_binary_present(
+        self, server, monkeypatch, tmp_path,
+    ):
+        binary = tmp_path / "llama-server.exe"
+        binary.write_bytes(b"\x00")
+        monkeypatch.setattr(bundled_module.paths, "bundled_server_binary",
+                            lambda: binary)
+        assert server.binary_available() is True
+
+    def test_returns_false_when_binary_missing(
+        self, server, monkeypatch, tmp_path,
+    ):
+        monkeypatch.setattr(
+            bundled_module.paths, "bundled_server_binary",
+            lambda: tmp_path / "no-such-file.exe",
+        )
+        assert server.binary_available() is False
+

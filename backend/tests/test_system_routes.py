@@ -227,13 +227,74 @@ class TestBundledStatus:
         resp = client.get("/api/system/bundled/status",
                           headers=_auth_headers())
         assert resp.status_code == 200
-        assert resp.json()["available"] is False
+        body = resp.json()
+        assert body["available"] is False
+        # When the service itself isn't wired (e.g. sidecar boot bailed
+        # early), binary_available collapses to False alongside available.
+        assert body["binary_available"] is False
 
     def test_rejects_without_bearer_auth(self, app_with_fake_api):
         app, _, _ = app_with_fake_api
         client = TestClient(app)
         resp = client.get("/api/system/bundled/status")
         assert resp.status_code == 401
+
+
+class TestBundledStatusBinaryAvailable:
+    """Stage-2 #12 — drive the /bundled/status binary_available wiring
+    through a real BundledServer instance against a real (tmp) filesystem
+    path. No mocks: the route reads `bs.binary_available()` on a real
+    BundledServer, which reads `paths.bundled_server_binary().exists()`
+    on a real Path."""
+
+    def _app_with_real_bundled(self, app_with_fake_api, settings, tmp_path):
+        from services.bundled_server import BundledServer
+        app, _, _ = app_with_fake_api
+        real_bs = BundledServer(settings)
+        app.state.container.api.bundled_server = real_bs
+        return app
+
+    def test_reports_binary_available_true_when_real_file_present(
+        self, app_with_fake_api, tmp_path, monkeypatch,
+    ):
+        from services import bundled_server as bundled_module
+        _, settings, _ = app_with_fake_api
+        app = self._app_with_real_bundled(app_with_fake_api, settings, tmp_path)
+
+        # Real file on disk at a real tmp path.
+        binary = tmp_path / "llama-server.exe"
+        binary.write_bytes(b"\x00")
+        monkeypatch.setattr(
+            bundled_module.paths, "bundled_server_binary", lambda: binary,
+        )
+
+        client = TestClient(app)
+        resp = client.get("/api/system/bundled/status",
+                          headers=_auth_headers())
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["available"] is True
+        assert body["binary_available"] is True
+
+    def test_reports_binary_available_false_when_path_does_not_exist(
+        self, app_with_fake_api, tmp_path, monkeypatch,
+    ):
+        from services import bundled_server as bundled_module
+        _, settings, _ = app_with_fake_api
+        app = self._app_with_real_bundled(app_with_fake_api, settings, tmp_path)
+
+        monkeypatch.setattr(
+            bundled_module.paths, "bundled_server_binary",
+            lambda: tmp_path / "no-such-binary.exe",
+        )
+
+        client = TestClient(app)
+        resp = client.get("/api/system/bundled/status",
+                          headers=_auth_headers())
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["available"] is True       # service is wired
+        assert body["binary_available"] is False  # …but the engine isn't there
 
 
 class TestBundledDownload:

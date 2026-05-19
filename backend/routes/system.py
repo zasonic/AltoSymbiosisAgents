@@ -295,10 +295,14 @@ async def bundled_status(request: Request) -> dict:
     bs = api.bundled_server
     if bs is None:
         return {"running": False, "port": None, "model_id": None,
-                "available": False}
+                "available": False, "binary_available": False}
     return {
         "running":   bs.is_running(),
         "port":      bs.port(),
         "model_id":  bs.model_id() or (api._settings.get("bundled_model_id", "") or None),
         "available": True,
+        # Stage-2 #12: lets the wizard show "Engine binary missing —
+        # download or reinstall" up front, instead of surfacing it as a
+        # BundledServerError when the user tries to start the server.
+        "binary_available": bs.binary_available(),
     }

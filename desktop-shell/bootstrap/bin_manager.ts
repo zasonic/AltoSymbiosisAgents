@@ -41,9 +41,20 @@ const PROJECT_ROOT = app.isPackaged
   ? app.getAppPath()
   : fileURLToPath(new URL("../..", import.meta.url));
 
-// TODO(engines): when the engine-download branch lands, extend isBootstrapped
-// with an existsSync check on <binRoot>/engines/llama-server.exe. Tracked at
-// the follow-up "engine variant download wizard" issue.
+// Engine binary lookup (Stage-2 #12). The bundled llama-server binary lives
+// in two possible spots:
+//   1. <installRoot>/llama-server/llama-server.exe — the path electron-builder
+//      copies branding/sidecar-bundle/llama-server/ to. The Python sidecar
+//      resolves this via paths.bundled_server_binary() at backend/core/paths.py.
+//   2. <binRoot>/engines/llama-server.exe — where a future engine-download
+//      wizard would drop the binary at runtime for users whose installer
+//      didn't ship it.
+// `hasEngineBinary()` returns true if either path exists. `isBootstrapped()`
+// does NOT gate sidecar boot on the engine binary because bundled mode is
+// opt-in — Claude API / Ollama / LM Studio users never need it. The renderer
+// reads the backend's /api/system/bundled/status `binary_available` flag for
+// the in-app guidance and only blocks the bundled-server start path when the
+// binary is missing.
 
 const SMOKE_SPAWN_TIMEOUT_MS = 10_000;
 const SMOKE_HEALTH_TIMEOUT_MS = 5_000;
@@ -71,6 +82,54 @@ export function getSidecarEntryPoint(): string {
   // `[project.scripts] altosymbiosis-server = "server:main"`. Sidecar.ts
   // spawns this directly with `--token ... --user-data ...`.
   return join(getBinRoot(), "sidecar-venv", "Scripts", "altosymbiosis-server.exe");
+}
+
+// ── Engine binaries (llama-server) ───────────────────────────────────────────
+
+/**
+ * Filename of the bundled llama.cpp server binary for the current platform.
+ * Mirrors `paths.bundled_server_binary()` at backend/core/paths.py:308.
+ */
+function engineBinaryName(): string {
+  return process.platform === "win32" ? "llama-server.exe" : "llama-server";
+}
+
+/**
+ * Candidate paths the bundled llama-server binary may live at.
+ *
+ *   1. <binRoot>/engines/<name> — where a future engine-download wizard
+ *      drops the binary at runtime (Stage-2 #12, follow-up).
+ *   2. <resources>/backend/llama-server/<name> — where electron-builder
+ *      copies `branding/sidecar-bundle/llama-server/` to in packaged builds.
+ *      Source checkouts read straight from
+ *      `branding/sidecar-bundle/llama-server/` instead.
+ *
+ * Order is "user-installed first, installer fallback second" so that a
+ * downloaded variant takes precedence over what shipped with the installer.
+ */
+export function getEngineBinaryCandidates(): string[] {
+  const name = engineBinaryName();
+  return [
+    join(getBinRoot(), "engines", name),
+    join(getResourceDir("backend"), "llama-server", name),
+    // Dev source-checkout fallback. `getResourceDir("backend")` resolves to
+    // <repo>/backend in dev, which doesn't carry the bundled binary; the
+    // branding tree under the repo root is where build-scripts drop it.
+    join(getResourceDir(""), "branding", "sidecar-bundle", "llama-server", name),
+  ];
+}
+
+/** Resolve the first existing engine binary path, or null if none present. */
+export function resolveEngineBinary(): string | null {
+  for (const candidate of getEngineBinaryCandidates()) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** True iff a bundled llama-server binary is present on disk anywhere. */
+export function hasEngineBinary(): boolean {
+  return resolveEngineBinary() !== null;
 }
 
 export function getResourceDir(name: string): string {
