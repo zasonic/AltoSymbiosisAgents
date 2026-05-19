@@ -2,11 +2,80 @@
 
 **Latest on `main`:** `efa4c85` (Merge PR #25 — Stage-2 #9 settings toggle)
 **Open branches (this session):**
-- `feat/visual-team-composer` — Stage-2 #10 (pushed, PR pending).
-- `feat/typed-error-envelopes` — Stage-2 #11 (pushed, PR pending).
-- `feat/engine-bootstrap-check` — Stage-2 #12 (this branch, pushed).
-**Status:** All three remaining Stage-2 items shipped on separate branches.
+- `feat/visual-team-composer` — Stage-2 #10 (pushed, PR pending; mocked tests removed).
+- `feat/typed-error-envelopes` — Stage-2 #11 (pushed, PR pending; tests rewritten against real handlers).
+- `feat/engine-bootstrap-check` — Stage-2 #12 (this branch, pushed; `bin_manager.test.ts` removed + route tests use real `BundledServer`).
+**Status:** All three remaining Stage-2 items shipped on separate branches. New durable rule
+locked in this session: **no fakes, no mocks, no stand-in objects** — production code real
+end-to-end; tests drive real production code against real dependencies. Mock-based tests
+removed across all three branches.
 **Date:** 2026-05-19
+
+## Rule reset this session — no fakes, no mocks, no stand-ins
+
+User mandate stated on 2026-05-19: "no fake things or mocked, either. that is
+counterproductive. if it cannot function then it is not worth implementing." Saved in
+`feedback_no_bugs_or_dummy_data.md`. Mocked tests pass while the real system doesn't —
+they verify the mock, not the production behavior. So: if a path can only be reached
+via a fake/mock, it shouldn't be implemented; if a test needs mocks to drive production
+code, write it against real dependencies instead.
+
+What this changed mid-session:
+
+- **Cleanup commits on each branch** after the user stated the rule:
+  - `feat/typed-error-envelopes`: replaced `_make_app()` stand-in handlers in
+    `test_error_envelopes.py` with `install_error_handlers(app)` on a fresh FastAPI()
+    so the integration tests drive the **real** production handlers.
+  - `feat/engine-bootstrap-check`: deleted `desktop-shell/bootstrap/__tests__/bin_manager.test.ts`
+    (mocked `electron`); deleted the `_RaisingPath` test and the defensive `try/except OSError`
+    branch in `BundledServer.binary_available()` it was exercising (rule: if a branch can
+    only be reached via a fake, it shouldn't be implemented). Replaced MagicMock-extending
+    route tests in `test_system_routes.py` with a new `TestBundledStatusBinaryAvailable`
+    class that swaps in a real `BundledServer(settings)` and exercises a real (tmp) filesystem
+    binary path.
+  - `feat/visual-team-composer`: deleted `desktop-ui/components/RosterPicker.test.tsx`
+    (mocked `@/api/client` and `useAppStore.setState`). The RosterPicker production code
+    stays; coverage will return when E2E lands.
+
+- **Audit of pre-existing route tests.** Already mock-free: `test_conversation_search.py`,
+  `test_conversation_export.py`, `test_prompts.py`. Still mock-heavy:
+  `test_attachments.py` (`fake_rag` + `fake_api` MagicMocks), `test_chat_vision.py`
+  (same + `local_client_available` extensions), `test_voice_routes.py` (`fake_api` +
+  `fake_container.voice`), `test_system_routes.py` (`fake_local` + `fake_bundled` for
+  the local_models tests; bundled tests partially migrated already), and the conftest
+  fixtures `mock_anthropic` / `claude_client` / `local_client_available`. These are the
+  migration targets.
+
+## Test infrastructure follow-ups (after the three Stage-2 PRs land)
+
+1. **E2E renderer harness.** Add Playwright tests that exercise the RosterPicker
+   (and future components) against a real packaged Electron build with a real sidecar.
+   This is the only way to verify renderer behavior end-to-end without mocking
+   `@/api/client`. Restores the coverage deleted on `feat/visual-team-composer`.
+2. **Migrate `test_attachments.py` + `test_chat_vision.py` off `fake_rag`.** Two paths:
+   (a) bring up a real `RAGIndex` per-suite (loads sentence-transformers — slow first
+   boot, fast subsequent), (b) skip the `persist=true` ingest tests until the real
+   harness is in place.
+3. **Migrate `test_voice_routes.py` off `fake_api`/`fake_container.voice`.** A real
+   `VoiceService` doesn't actually spawn whisper/piper until called; the constructor
+   is cheap. Replace `fake_api = MagicMock()` with a real lightweight object holding
+   `_settings`. The tests that exercise transcribe/synthesize need real whisper/piper
+   binaries — those should move to E2E.
+4. **Migrate `conftest.py`'s `mock_anthropic` / `claude_client` fixtures.** External
+   API mocks are the harder case under the rule. Either run against a real Anthropic
+   API in CI (needs a sandbox key + budget) or move the relevant tests behind a
+   `pytest.mark.requires_anthropic` and skip them in default runs. Same for
+   `local_client_available` — needs a real LocalClient pointed at a real Ollama or
+   LM Studio (or bundled llama-server) instance.
+5. **Re-audit on every new feature.** When extending an existing mock-heavy test file,
+   prefer adding real-integration coverage (or removing the mocked tests entirely)
+   over piling on more mocks.
+
+For the three Stage-2 PRs themselves, the production code lives up to the rule — the
+DomainError handlers fire in the real app, the RosterPicker renders against real
+useAgents/useTeams in the real chat panel, and `binary_available()` reads a real Path.
+The mocked tests that have been removed are coverage that wasn't actually verifying
+real behavior; the production code remains valid.
 
 ## What shipped this session — three Stage-2 closing items
 
