@@ -1,17 +1,47 @@
 # Handoff
 
-**Last commit:** _pending_ — `chore(ui): migrate ChatView list fetches to TanStack Query`
-**Branch:** `chore/chatview-tanstack-query` · **Pushed:** no · **Stacked on:** `chore/chatview-decomposition-part-2`
+**Latest on `main`:** `bf4afe0` (Merge PR #19 — TanStack Query migration)
+**Status:** Stage-2 #8 ChatView decomposition is structurally complete.
 **Date:** 2026-05-18
 
-## What just shipped (this branch)
+## What just shipped (Stage 2 #8, across four merged PRs)
 
-**Stage 2 / item #8 — third PR** (and the finisher for the
-decomposition-proper portion of #8). Migrates the three list fetches
-in `ChatView` — `Chat.list`, `Agents.list`, `Teams.list` — off
-ad-hoc `useState` + `useEffect` and onto `@tanstack/react-query`,
-giving the renderer a shared cache, automatic focus-refetch, and a
-single place to invalidate after mutations.
+`ChatView.tsx` went from **2,762 → 2,146 LOC** (−616, ~22%), with four
+focused sibling modules under `desktop-ui/components/chat/` and 36 new
+unit tests. Plus a separate CI maintenance PR. Order of landing on main:
+
+- **PR #22 (`chore/actions-node-24-bump`).** Bumps four pinned actions
+  (`checkout`, `setup-node`, `setup-python`, `github-script`) to the
+  first major shipping a Node 24 runtime, ahead of GitHub's 2026-06-02
+  cutover.
+- **PR #20 (`chore/extract-derive-thinking-timeline`).** Pulls the
+  ~300-line `_deriveThinkingTimeline` reducer + 15 event-shape
+  interfaces + `_truncate` helper out of ChatView into
+  `chat/deriveThinkingTimeline.ts` (15 tests).
+- **PR #21 (`chore/chatview-decomposition-part-2`).** Three further
+  extractions:
+    - `chat/derivePipelineLive.ts` — sibling reducer over the SSE
+      event log → `PipelineLive` (11 tests).
+    - `chat/ThinkingTimeline.tsx` — render component + private
+      palette helper, decoupled from the reducer (5 tests).
+    - `chat/useRoster.ts` — hook owning `pendingRoster` state, current
+      binding derivations, and the `applyRoster` async with toast +
+      rollback semantics (10 tests).
+    - `chat/events.ts` — shared `StreamingEvent` type the two
+      reducers consume.
+- **PR #19 (`chore/chatview-tanstack-query`).** Replaces three
+  `useState` + `useEffect` data-fetch blocks (`Chat.list`,
+  `Agents.list`, `Teams.list`) with TanStack Query hooks in
+  `chat/queries.ts`. Adds `QueryClientProvider` at the renderer root;
+  wraps `ChatView.test.tsx` renders in a per-test client (10 tests).
+  Renderer now has a single shared cache, automatic focus-refetch,
+  and one place to invalidate after mutations.
+
+Bonus: PR #18 (`fix/roster-team-id-passthrough`) landed earlier the
+same day — backend one-line fix to the facade method
+`chat_set_conversation_roster` that was silently dropping `team_id`
+and breaking every RosterPicker apply with HTTP 500 (3 tests pinning
+the kwargs forwarding seam).
 
 - **`package.json`.** Adds `@tanstack/react-query ^5.62.0`. React-19
   compatible, no peer-dep churn.
@@ -54,65 +84,82 @@ single place to invalidate after mutations.
   into `[]`, and a fresh-cache second mount of `useConversations`
   reuses the existing entry (no extra `Chat.list` call).
 
-## Verified
+## Verified (at the tip of `main`, post-all-merges)
 
-- `npx vitest run desktop-ui/components/chat/queries.test.tsx`
-  → **10 passed**.
-- `npm run typecheck` — clean.
-- `npm run test:frontend` — **145 passed** across 16 files (up
-  from 135; +10 from this PR; no regressions in `ChatView.test.tsx`
-  after the provider wrap).
+- `npm run typecheck` — clean (both `tsconfig.node.json` and
+  `tsconfig.web.json`).
+- `npm run test:frontend` — **145 passed** across 16 files (was
+  **94** before Stage 8; +51 new tests across the four PRs).
+- `cd backend && python -m pytest tests/ -q` — **720 passed, 9
+  skipped, 13 deselected** (carried over from the fix-roster PR
+  baseline; Stage 8 was frontend-only).
 - `npm run build` — clean (no new size-tier warnings beyond the
   pre-existing mermaid / wardley chunks).
 
-## Stage-2 status (post-this-PR)
+## Stage-2 status
 
 - **#7 LangGraph 1.2 StateGraph orchestrator** — landed (PR #17).
-  Default flip gated on bench cycles.
-- **#8 ChatView decomposition** — **decomposition portion done**:
-    1. `chore/extract-derive-thinking-timeline` (PR open).
-    2. `chore/chatview-decomposition-part-2` (PR open, stacked).
-    3. **This PR** (`chore/chatview-tanstack-query`, stacked on #2).
-  Remaining sub-items deferred as separate efforts:
-  **shadcn/ui swap** (whole-UI library migration, multi-PR) and
-  **wider TanStack adoption** (RosterPicker / AgentPanel also fetch
-  `Agents.list` / `Teams.list` independently — they can now adopt
-  the same hooks and share the cache; a small follow-up).
+  Default still `"legacy"`; flip gated on two consecutive weekly
+  AgentDojo + agentic-misalignment bench cycles under
+  `orchestrator_engine="graph"`.
+- **#8 ChatView decomposition** — **decomposition portion done** (PRs
+  #19, #20, #21 merged). Remaining sub-items deferred as separate
+  efforts: **shadcn/ui swap** (whole-UI library migration, multi-PR)
+  and **wider TanStack adoption** (RosterPicker / AgentPanel still
+  fetch `Agents.list` / `Teams.list` with their own
+  `useState` + `useEffect`; can adopt the new `useAgents()` /
+  `useTeams()` hooks from `chat/queries.ts` and share the cache —
+  small ~30-LOC-per-component follow-up).
 - **#9 Devin-style timeline** — pending. With `ThinkingTimeline`
-  extracted, building the drillable variant is now a sibling
-  component, not a refactor.
-- **#10 Visual TeamComposer** — pending. The `useRoster()` hook
-  from PR #2 plus the shared `useAgents()` / `useTeams()` from
-  this PR cover the full surface a redesigned composer needs.
+  extracted, the drillable variant is now a new sibling component
+  over the same `ThinkingRow[]` shape, not a refactor.
+- **#10 Visual TeamComposer** — pending. The `useRoster()` hook plus
+  the shared `useAgents()` / `useTeams()` cover the full surface a
+  redesigned composer needs.
 - **#11 Typed error envelopes** — pending.
 - **#12 Bundled llama-server binary** — pending.
 
 ## Open / parallel branches
 
-- **`fix/roster-team-id-passthrough`** (PR open). Backend
-  one-liner — independent of all the ChatView work.
-- **`chore/extract-derive-thinking-timeline`** (PR open). First
-  decomposition PR. Merge first.
-- **`chore/chatview-decomposition-part-2`** (PR open, stacked on
-  #1). Second decomposition PR. Merge after #1.
-- **`chore/chatview-tanstack-query`** (PR open, stacked on #2,
-  **this PR**). Merge after #2.
+None. All five PRs from this stage (#18, #19, #20, #21, #22) landed.
 
 ## Next up
 
-Three directions, roughly increasing in scope:
+Recommended starting point: **Stage-2 #9 — Devin-style timeline.**
+Biggest visible user-facing win, builds directly on what just shipped,
+no further ChatView surgery required. New sibling component to
+`ThinkingTimeline` that takes the same `ThinkingRow[]` shape and
+renders an expandable per-step drill-down (click a row → its detail
+expands, with sub-step traces when present). Lives at
+`desktop-ui/components/chat/DevinTimeline.tsx`. Keep `ThinkingTimeline`
+untouched — some callers will prefer the compact view; wire the new
+component behind a settings toggle in a follow-up PR.
 
-1. **Adopt the new query hooks in RosterPicker and AgentPanel.**
-   Both still hit `Agents.list` / `Teams.list` directly with their
-   own `useState` + `useEffect`. Switching them to `useAgents()` /
-   `useTeams()` gives them cache sharing with ChatView and removes
-   the "rename in AgentPanel, conversation list shows old name
-   until reload" UX paper cut. ~30 lines per component.
-2. **Stage-2 #9 — Devin-style timeline.** New sibling component
-   over `deriveThinkingTimeline`'s output, no ChatView surgery.
-3. **Stage-2 #10 — Visual TeamComposer.** Render-layer rewrite of
-   `RosterPicker` against the new hook surface (`useRoster` +
-   `useAgents` + `useTeams`).
+Other candidates, in roughly increasing scope:
+
+1. **Stage-2 #8 hook-adoption follow-up.** Migrate `RosterPicker.tsx`
+   and `AgentPanel.tsx` off their own `useState` + `useEffect` fetches
+   of `Agents.list` / `Teams.list` onto the new `useAgents()` /
+   `useTeams()` hooks from `chat/queries.ts`. Net win: cache sharing
+   with `ChatView`, automatic refresh after `AgentPanel` mutations
+   (rename / create / delete) via `queryClient.invalidateQueries(
+   { queryKey: ["agents"] })`. ~30 lines per component.
+2. **Stage-2 #10 — Visual TeamComposer.** Render-layer rewrite of
+   `RosterPicker.tsx` against the multi-agent UX direction (chip
+   cards, not dropdowns; auto-pick coordinator from role field).
+   Backend surface (`useRoster` + `useAgents` + `useTeams`) is in
+   place. Keep the public props stable so ChatView's call site
+   doesn't change.
+3. **Stage-2 #11 — typed error envelopes.** Backend work; converts
+   exception messages into a discriminated-union JSON shape the
+   renderer can pattern-match.
+4. **Stage-2 #12 — bundled llama-server binary.** Sidecar packaging
+   work; ships a llama.cpp binary inside the installer so first-run
+   local-LLM users don't need a separate download step.
+5. **Stage-2 #7 follow-up.** Weekly AgentDojo + agentic-misalignment
+   bench cycles under `orchestrator_engine="graph"`. Two consecutive
+   clean runs gate the default flip away from `"legacy"`. Mostly a
+   waiting task, not coding.
 
 ## Walls hit
 
